@@ -1,0 +1,80 @@
+{
+  "aggregate": {
+    "total": 4046556,
+    "input": {
+      "total": 3847763,
+      "cached": 29440
+    },
+    "output": {
+      "total": 198793,
+      "reasoning": 0,
+      "accepted_prediction": 0,
+      "rejected_prediction": 0
+    }
+  },
+  "initialize": {
+    "total": 0,
+    "input": {
+      "total": 0,
+      "cached": 0
+    },
+    "output": {
+      "total": 0,
+      "reasoning": 0,
+      "accepted_prediction": 0,
+      "rejected_prediction": 0
+    }
+  },
+  "select": {
+    "total": 0,
+    "input": {
+      "total": 0,
+      "cached": 0
+    },
+    "output": {
+      "total": 0,
+      "reasoning": 0,
+      "accepted_prediction": 0,
+      "rejected_prediction": 0
+    }
+  },
+  "cancel": {
+    "total": 0,
+    "input": {
+      "total": 0,
+      "cached": 0
+    },
+    "output": {
+      "total": 0,
+      "reasoning": 0,
+      "accepted_prediction": 0,
+      "rejected_prediction": 0
+    }
+  },
+  "call": {
+    "total": 3708769,
+    "input": {
+      "total": 3567311,
+      "cached": 29440
+    },
+    "output": {
+      "total": 141458,
+      "reasoning": 0,
+      "accepted_prediction": 0,
+      "rejected_prediction": 0
+    }
+  },
+  "describe": {
+    "total": 337787,
+    "input": {
+      "total": 280452,
+      "cached": 0
+    },
+    "output": {
+      "total": 57335,
+      "reasoning": 0,
+      "accepted_prediction": 0,
+      "rejected_prediction": 0
+    }
+  }
+}

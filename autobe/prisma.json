@@ -1,0 +1,2151 @@
+{
+  "files": [
+    {
+      "filename": "schema-01-core.prisma",
+      "namespace": "Core",
+      "models": [
+        {
+          "name": "virtual_account_customers",
+          "description": "Customer information for virtual account issuance and deposit tracking - Implements the customer registration and KYC requirements from the requirements report (see '고객 등록', '주요 사용자 및 역할').\n\nCustomers are the primary end-users of the virtual account system. This model holds personal and contact details (name, phone/email), registration data, and references for subsequent account/transaction linkage. Maintains strict 3NF normalization with separate linking to roles and activity logs. For example, it's used whenever a new service registration or account issuance is initiated. \n\nKey relationships: to issued virtual accounts, deposits, notifications, and activity logs. Special behaviors: ensures unique identification and secure, normalized personal data storage.",
+          "material": false,
+          "primaryField": {
+            "name": "id",
+            "type": "uuid",
+            "description": "Primary Key. Unique identifier for a customer."
+          },
+          "foreignFields": [],
+          "plainFields": [
+            {
+              "name": "name",
+              "type": "string",
+              "description": "Customer's full name - Implements the basic KYC registration requirement. Stores the person name atomically for identification. Example: '홍길동'. Must be present for every customer.",
+              "nullable": false
+            },
+            {
+              "name": "phone",
+              "type": "string",
+              "description": "Customer's primary phone number - Implements contact verification requirement. Example: '010-1234-5678'. Normalized as a single value.",
+              "nullable": false
+            },
+            {
+              "name": "email",
+              "type": "string",
+              "description": "Customer's main email address - Implements contact/alarm requirements. Used for notifications, password reset, and 2FA. Example: 'hong@test.com'.",
+              "nullable": false
+            },
+            {
+              "name": "registered_at",
+              "type": "datetime",
+              "description": "Date/time of customer registration - Implements audit/tracing of service initiation requirement. Example: '2025-04-01T15:23:00+09:00'. 3NF: does not pre-calculate any durations.",
+              "nullable": false
+            },
+            {
+              "name": "deleted_at",
+              "type": "datetime",
+              "description": "Soft deletion timestamp - Implements retention and deletion compliance requirements. Null unless account is deleted. 3NF compliance, nullable field.",
+              "nullable": true
+            }
+          ],
+          "uniqueIndexes": [
+            {
+              "fieldNames": [
+                "phone"
+              ],
+              "unique": true
+            },
+            {
+              "fieldNames": [
+                "email"
+              ],
+              "unique": true
+            }
+          ],
+          "plainIndexes": [
+            {
+              "fieldNames": [
+                "registered_at"
+              ]
+            }
+          ],
+          "ginIndexes": [
+            {
+              "fieldName": "name"
+            }
+          ]
+        },
+        {
+          "name": "virtual_account_admins",
+          "description": "Administrator user information for virtual account management system. Implements requirements for role-based secure admin management from administrator/슈퍼관리자 roles in requirements analysis.\n\nAdmin accounts have audit/admin privileges over customer, account, deposit and notification activities. Maintains strict 3NF and links to role/permission management. For example, whenever a dashboard login occurs, or account status is updated, this model is referenced.\n\nKey relationships: roles, activity logs, 2FA records. Special behaviors: login, password reset, admin lockout policies enforced.",
+          "material": false,
+          "primaryField": {
+            "name": "id",
+            "type": "uuid",
+            "description": "Primary Key. Unique identifier for an admin user."
+          },
+          "foreignFields": [],
+          "plainFields": [
+            {
+              "name": "username",
+              "type": "string",
+              "description": "Administrator login name - Implements secure admin/authentication requirements. Must be unique, 3NF: atomic login ID.",
+              "nullable": false
+            },
+            {
+              "name": "password_hash",
+              "type": "string",
+              "description": "Hashed password for admin authentication - Implements PW/2FA compliance. Never stores plain password. 3NF compliant; hash only.",
+              "nullable": false
+            },
+            {
+              "name": "email",
+              "type": "string",
+              "description": "Admin email for alerts and reset - Implements notification and security policies. Used for e.g. 2FA, system alerts. Must be unique for admins.",
+              "nullable": false
+            },
+            {
+              "name": "created_at",
+              "type": "datetime",
+              "description": "Admin account creation timestamp - For audit trail and security reporting. Example: '2025-06-01T13:00:00+09:00'. 3NF, not calculated. Used in logins and account audits.",
+              "nullable": false
+            },
+            {
+              "name": "last_login_at",
+              "type": "datetime",
+              "description": "Last login time for the admin user. Implements compliance and monitoring requirements. Null if never logged in. 3NF (never pre-computes durations).",
+              "nullable": true
+            },
+            {
+              "name": "locked_until",
+              "type": "datetime",
+              "description": "Account lockout timestamp. Implements login security, lockout after failed logins, etc. Null if not locked. 3NF compliant.",
+              "nullable": true
+            }
+          ],
+          "uniqueIndexes": [
+            {
+              "fieldNames": [
+                "username"
+              ],
+              "unique": true
+            },
+            {
+              "fieldNames": [
+                "email"
+              ],
+              "unique": true
+            }
+          ],
+          "plainIndexes": [
+            {
+              "fieldNames": [
+                "created_at"
+              ]
+            }
+          ],
+          "ginIndexes": []
+        },
+        {
+          "name": "virtual_account_super_admins",
+          "description": "Super admin (root) account list - Implements the optional 'super administrator' role for total platform policy management (See requirements section '슈퍼관리자(선택적)').\n\nHas the highest privileges: managing admin roles, audit policies, system settings. Strictly normalized and isolated for extra security. Used for system-level actions and on-boarding new admins. Referenced when privilege delegation, emergency actions, policy changes are logged.\n\nKey relationships: to admin/role audit logs. Special behavior: extreme restrictions, single or minimal rows expected.",
+          "material": false,
+          "primaryField": {
+            "name": "id",
+            "type": "uuid",
+            "description": "Primary Key. Unique identifier for the super admin."
+          },
+          "foreignFields": [],
+          "plainFields": [
+            {
+              "name": "username",
+              "type": "string",
+              "description": "Super admin login name - Implements root-level authentication. Unique value. 3NF: atomic per super admin.",
+              "nullable": false
+            },
+            {
+              "name": "password_hash",
+              "type": "string",
+              "description": "Password hash for super admin login - Never stores plain text password, for compliance. 3NF, hash only.",
+              "nullable": false
+            },
+            {
+              "name": "created_at",
+              "type": "datetime",
+              "description": "Super admin account creation timestamp. For audit/logging only. 3NF only (no derived values).",
+              "nullable": false
+            }
+          ],
+          "uniqueIndexes": [
+            {
+              "fieldNames": [
+                "username"
+              ],
+              "unique": true
+            }
+          ],
+          "plainIndexes": [
+            {
+              "fieldNames": [
+                "created_at"
+              ]
+            }
+          ],
+          "ginIndexes": []
+        },
+        {
+          "name": "virtual_account_roles",
+          "description": "Role types for RBAC - Implements the role/permission separation requirement across admins/super admins outlined in the requirements (see '권한 및 역할 관리').\n\nDefines roles such as ordinary admin, super admin, audit viewer, etc. Normalized, with join-table to permissions. Used whenever access is checked for any admin action or UI section. \n\nKey relationships: to admins, role-permission links. Special behaviors: strictly assigned to users, not containing calculated or redundant fields.",
+          "material": false,
+          "primaryField": {
+            "name": "id",
+            "type": "uuid",
+            "description": "Primary Key. Unique role identifier."
+          },
+          "foreignFields": [],
+          "plainFields": [
+            {
+              "name": "name",
+              "type": "string",
+              "description": "Role name (e.g. ADMIN, SUPER_ADMIN, AUDITOR) - Implements the requirement for explicit named roles per RBAC. Unique/atomic. Example: 'ADMIN'.",
+              "nullable": false
+            },
+            {
+              "name": "description",
+              "type": "string",
+              "description": "Role description - Explains scope/limitations of the role as required for audit and onboarding. Does not duplicate other info; 3NF compliant.",
+              "nullable": false
+            }
+          ],
+          "uniqueIndexes": [
+            {
+              "fieldNames": [
+                "name"
+              ],
+              "unique": true
+            }
+          ],
+          "plainIndexes": [],
+          "ginIndexes": []
+        },
+        {
+          "name": "virtual_account_permissions",
+          "description": "Permission (action/capability) definitions for RBAC - Implements the fine-grained action/permission requirement outlined in '권한 및 역할 관리'.\n\nNormalizes all possible platform permissions (e.g. VIEW_DASHBOARD, MANAGE_CUSTOMERS, EXPORT_EXCEL) for assignment to roles. Used in evaluating/assigning privilege for every admin action.\n\nKey relationships: to roles via role-permission join table. Special: maintained as a unique normalized catalog of permissions. Usage: permission assignment, audit, onboarding.",
+          "material": false,
+          "primaryField": {
+            "name": "id",
+            "type": "uuid",
+            "description": "Primary Key. Unique permission identifier."
+          },
+          "foreignFields": [],
+          "plainFields": [
+            {
+              "name": "code",
+              "type": "string",
+              "description": "Permission code (e.g. VIEW_DASHBOARD) - Implements explicit permission control per RBAC/requirement. Must be unique. Example: 'VIEW_DASHBOARD'.",
+              "nullable": false
+            },
+            {
+              "name": "description",
+              "type": "string",
+              "description": "Permission description - Explains business use and scope. Example: '권한 없는 화면 접근시 오류 발생'. 3NF compliant documentation.",
+              "nullable": false
+            }
+          ],
+          "uniqueIndexes": [
+            {
+              "fieldNames": [
+                "code"
+              ],
+              "unique": true
+            }
+          ],
+          "plainIndexes": [],
+          "ginIndexes": []
+        },
+        {
+          "name": "virtual_account_role_permissions",
+          "description": "Join table for role-permission (M:N) mapping - Implements normalized M:N assignment from RBAC rules ('권한 및 역할 관리' section of requirements).\n\nEnsures 3NF/bridge table between roles and permissions: For example, allows 'ADMIN' role to be mapped to multiple permissions, and same permission assigned to multiple roles. Used when admins are checked for permissions, or permission assignment screens/audit logs.\n\nKey relationships: role → M:N → permission. Special: field-level uniqueness and no redundant/cached data (enforced by composite unique index).",
+          "material": false,
+          "primaryField": {
+            "name": "id",
+            "type": "uuid",
+            "description": "Primary Key. Unique link for each assignment of role-permission."
+          },
+          "foreignFields": [
+            {
+              "name": "role_id",
+              "type": "uuid",
+              "description": "Reference to the target role - Links to {@link virtual_account_roles.id} per M:N design.",
+              "relation": {
+                "name": "role",
+                "targetModel": "virtual_account_roles"
+              },
+              "unique": false,
+              "nullable": false
+            },
+            {
+              "name": "permission_id",
+              "type": "uuid",
+              "description": "Reference to the permission - Links to {@link virtual_account_permissions.id} per M:N design.",
+              "relation": {
+                "name": "permission",
+                "targetModel": "virtual_account_permissions"
+              },
+              "unique": false,
+              "nullable": false
+            }
+          ],
+          "plainFields": [],
+          "uniqueIndexes": [
+            {
+              "fieldNames": [
+                "role_id",
+                "permission_id"
+              ],
+              "unique": true
+            }
+          ],
+          "plainIndexes": [],
+          "ginIndexes": []
+        }
+      ]
+    },
+    {
+      "filename": "schema-02-accounts_and_deposits.prisma",
+      "namespace": "AccountsAndDeposits",
+      "models": [
+        {
+          "name": "virtual_account_banks",
+          "description": "[Bank Master Table] - This implements the requirement from the external integration and account issuance documentation for managing supported banks for virtual accounts. \n\nThis model records all banks that can provide virtual accounts through API integration. Maintains 3NF by storing only atomic banking details with no duplication. For example, used when listing banks for new virtual account issuance, and during bank code mapping for deposits. \n\nKey relationships: referenced by virtual accounts for provider identification.\nSpecial behaviors: Banks are referenced as foreign keys; cannot be deleted if linked to an account.",
+          "material": false,
+          "primaryField": {
+            "name": "id",
+            "type": "uuid",
+            "description": "Primary Key. Unique identifier for bank master record."
+          },
+          "foreignFields": [],
+          "plainFields": [
+            {
+              "name": "name",
+              "type": "string",
+              "description": "[Bank Name] - Implements bank descriptive naming requirement. Stores the display name shown to users and admins; required for clear account identification. Ensures 3NF; no calculated values. Example: 'KEB 하나은행'",
+              "nullable": false
+            },
+            {
+              "name": "code",
+              "type": "string",
+              "description": "[Bank Code] - Required for external integration with PG/bank API and unique mapping. Stores standard banking code; must be unique. Example: '004' for KB.",
+              "nullable": false
+            },
+            {
+              "name": "logo_url",
+              "type": "uri",
+              "description": "[Bank logo URI] - Implements branding requirement. Stores image/logo URI for UI/UX display. Remains atomic and non-redundant; example: used on virtual account selector.",
+              "nullable": true
+            },
+            {
+              "name": "created_at",
+              "type": "datetime",
+              "description": "[Created Timestamp] - Implements audit trail and reporting requirement. Records when the bank entry was added. Never null. Example: new provider onboarding date.",
+              "nullable": false
+            },
+            {
+              "name": "updated_at",
+              "type": "datetime",
+              "description": "[Updated Timestamp] - For record modification audit. Non-nullable to ensure full audit.",
+              "nullable": false
+            }
+          ],
+          "uniqueIndexes": [
+            {
+              "fieldNames": [
+                "code"
+              ],
+              "unique": true
+            }
+          ],
+          "plainIndexes": [
+            {
+              "fieldNames": [
+                "name"
+              ]
+            }
+          ],
+          "ginIndexes": []
+        },
+        {
+          "name": "virtual_account_pg_providers",
+          "description": "[PG Provider Master Table] - Implements requirement for managing all virtual account-enabled payment gateways (PGs) in the system, e.g., KG이니시스, Toss Payments. \n\nPurpose: Track supported PG providers available for account issuance and deposit APIs. Maintains 3NF by only storing atomic and provider-specific info. Used for: PG provider selection during account issuance and reporting. Relations: Referenced by virtual_account_virtual_accounts table. \n\nSpecial behaviors: Cannot be deleted if virtual accounts reference this row.",
+          "material": false,
+          "primaryField": {
+            "name": "id",
+            "type": "uuid",
+            "description": "Primary Key. Unique identifier for the PG provider."
+          },
+          "foreignFields": [],
+          "plainFields": [
+            {
+              "name": "name",
+              "type": "string",
+              "description": "[Provider Name] - Implements requirement for descriptive naming; e.g., 'KG이니시스'. Used for selection and listings. 3NF; never calculated.",
+              "nullable": false
+            },
+            {
+              "name": "code",
+              "type": "string",
+              "description": "[Provider Code] - Implements API reference requirement. Used as code on API calls; e.g., 'KG', 'TOSS'. Must be unique.",
+              "nullable": false
+            },
+            {
+              "name": "api_endpoint",
+              "type": "uri",
+              "description": "[API Endpoint URI] - Implements provider API connection config. Stores external endpoint for integration; 3NF-compliant. For example: used in account issuance polling.",
+              "nullable": false
+            },
+            {
+              "name": "created_at",
+              "type": "datetime",
+              "description": "[Created Timestamp] - Tracks when provider was onboarded; for audits. Example: contract/registration date.",
+              "nullable": false
+            },
+            {
+              "name": "updated_at",
+              "type": "datetime",
+              "description": "[Updated Timestamp] - Tracks last update to provider info. Required for system health checks.",
+              "nullable": false
+            }
+          ],
+          "uniqueIndexes": [
+            {
+              "fieldNames": [
+                "code"
+              ],
+              "unique": true
+            }
+          ],
+          "plainIndexes": [
+            {
+              "fieldNames": [
+                "name"
+              ]
+            }
+          ],
+          "ginIndexes": []
+        },
+        {
+          "name": "virtual_account_virtual_accounts",
+          "description": "[Virtual Account Base Table] - Implements requirement for tracking all virtual accounts issued by the system per customer, per bank, and per PG. Maintains 3NF by storing only atomic account attributes. Example: used when querying account list, matching incoming deposit, auditing issuance records.\n\nKey relationships: references customers, banks, PG providers; referenced by status logs, deposits.\nSpecial behaviors: Expired/finished accounts soft-marked, never physically deleted.",
+          "material": false,
+          "primaryField": {
+            "name": "id",
+            "type": "uuid",
+            "description": "Primary Key. Unique ID for each issued virtual account."
+          },
+          "foreignFields": [
+            {
+              "name": "customer_id",
+              "type": "uuid",
+              "description": "References the customer who owns the virtual account; target: virtual_account_customers.id. Fulfills customer-account connection requirement for issuance/matching/audit.",
+              "relation": {
+                "name": "customer",
+                "targetModel": "virtual_account_customers"
+              },
+              "unique": false,
+              "nullable": false
+            },
+            {
+              "name": "bank_id",
+              "type": "uuid",
+              "description": "References external bank; target: virtual_account_banks.id. Required for mapping account to bank for integration/API.",
+              "relation": {
+                "name": "bank",
+                "targetModel": "virtual_account_banks"
+              },
+              "unique": false,
+              "nullable": false
+            },
+            {
+              "name": "pg_provider_id",
+              "type": "uuid",
+              "description": "References PG provider; target: virtual_account_pg_providers.id. Ensures every account is linked to origin PG for webhook/API updates.",
+              "relation": {
+                "name": "pg_provider",
+                "targetModel": "virtual_account_pg_providers"
+              },
+              "unique": false,
+              "nullable": false
+            }
+          ],
+          "plainFields": [
+            {
+              "name": "account_number",
+              "type": "string",
+              "description": "[Account Number] - Implements virtual account number issuance, matches external format. 3NF, always unique in combination with bank/PG.",
+              "nullable": false
+            },
+            {
+              "name": "expire_at",
+              "type": "datetime",
+              "description": "[Valid Until] - Records expiry date/time for virtual account. Used for invalidation/cleanup/alerts. Not calculated, atomic datetime only.",
+              "nullable": false
+            },
+            {
+              "name": "status",
+              "type": "string",
+              "description": "[Account Status] - Implements lifecycle state such as 'ACTIVE', 'EXPIRED', 'CLOSED'. Required for dashboard/status change. 3NF; single value only.",
+              "nullable": false
+            },
+            {
+              "name": "holder_name",
+              "type": "string",
+              "description": "[Account Holder Name] - Stores name displayed as account owner. Used for recipient matching. Never calculated, non-null.",
+              "nullable": false
+            },
+            {
+              "name": "created_at",
+              "type": "datetime",
+              "description": "[Issued Timestamp] - Audit info of when the account was created/issued.",
+              "nullable": false
+            },
+            {
+              "name": "updated_at",
+              "type": "datetime",
+              "description": "[Last Modified Timestamp] - Audit info for status or info edits. Not null.",
+              "nullable": false
+            },
+            {
+              "name": "closed_at",
+              "type": "datetime",
+              "description": "[Closed Timestamp] - Set when account is expired/finished. Used for stats and reporting. Null when account is open.",
+              "nullable": true
+            }
+          ],
+          "uniqueIndexes": [
+            {
+              "fieldNames": [
+                "account_number",
+                "bank_id",
+                "pg_provider_id"
+              ],
+              "unique": true
+            }
+          ],
+          "plainIndexes": [
+            {
+              "fieldNames": [
+                "customer_id"
+              ]
+            },
+            {
+              "fieldNames": [
+                "expire_at"
+              ]
+            }
+          ],
+          "ginIndexes": []
+        },
+        {
+          "name": "virtual_account_account_status_logs",
+          "description": "[Account Status Change Log] - Implements audit and regulatory requirement for recording every status transition (e.g., activate, expire, close) on a virtual account. \n\n3NF is guaranteed by normalizing log per event; never includes calculated/summary fields. Used when tracking account lifecycle changes for auditing/system tracing.\n\nKey relationships: references virtual_account_virtual_accounts and admin (actor).",
+          "material": false,
+          "primaryField": {
+            "name": "id",
+            "type": "uuid",
+            "description": "Primary Key. Unique key for status log."
+          },
+          "foreignFields": [
+            {
+              "name": "virtual_account_id",
+              "type": "uuid",
+              "description": "References the virtual account; implements per-account audit logging. Target: virtual_account_virtual_accounts.id.",
+              "relation": {
+                "name": "virtual_account",
+                "targetModel": "virtual_account_virtual_accounts"
+              },
+              "unique": false,
+              "nullable": false
+            },
+            {
+              "name": "admin_id",
+              "type": "uuid",
+              "description": "References the admin who performed the status change. Implements actor audit. Target: virtual_account_admins.id.",
+              "relation": {
+                "name": "admin",
+                "targetModel": "virtual_account_admins"
+              },
+              "unique": false,
+              "nullable": false
+            }
+          ],
+          "plainFields": [
+            {
+              "name": "from_status",
+              "type": "string",
+              "description": "[Old Status] - Records pre-change status. E.g., 'ACTIVE'. Ensures all transitions are atomic records only, fully normalized.",
+              "nullable": false
+            },
+            {
+              "name": "to_status",
+              "type": "string",
+              "description": "[New Status] - New status after change. Used in transition tracking. Example: 'EXPIRED'.",
+              "nullable": false
+            },
+            {
+              "name": "reason",
+              "type": "string",
+              "description": "[Change Reason] - Implements requirement to provide reason for change (free text). Atomic string; example: 'expired by bank'.",
+              "nullable": false
+            },
+            {
+              "name": "changed_at",
+              "type": "datetime",
+              "description": "[Status Changed Timestamp] - Exact time status changed. No calculated field. Required for sequential status history.",
+              "nullable": false
+            }
+          ],
+          "uniqueIndexes": [],
+          "plainIndexes": [
+            {
+              "fieldNames": [
+                "virtual_account_id",
+                "changed_at"
+              ]
+            }
+          ],
+          "ginIndexes": []
+        },
+        {
+          "name": "virtual_account_deposits",
+          "description": "[Deposit Event Table] - Implements requirement for logging every incoming deposit to any virtual account; never stores summaries, only atomic events. 3NF compliance is met by logging one row per real deposit event, no aggregation.\n\nBusiness context: Core of auto-matching, alarm, ERP integration. Example: every webhook from PG/bank creates a row here.\n\nKey relationships: References virtual_account_virtual_accounts, used in matching, error, notification modules.",
+          "material": false,
+          "primaryField": {
+            "name": "id",
+            "type": "uuid",
+            "description": "Primary Key. Unique row for deposit event."
+          },
+          "foreignFields": [
+            {
+              "name": "virtual_account_id",
+              "type": "uuid",
+              "description": "References the virtual account related to this deposit. Used for matching and statistics. Target: virtual_account_virtual_accounts.id.",
+              "relation": {
+                "name": "virtual_account",
+                "targetModel": "virtual_account_virtual_accounts"
+              },
+              "unique": false,
+              "nullable": false
+            }
+          ],
+          "plainFields": [
+            {
+              "name": "amount",
+              "type": "double",
+              "description": "[Deposit Amount] - Atomic value of money incoming. Must be exact match for auto-matching. Example: 124000.50",
+              "nullable": false
+            },
+            {
+              "name": "depositor_name",
+              "type": "string",
+              "description": "[Depositor Name] - Captures sender for matching/audit. 3NF, only string, never summary.",
+              "nullable": false
+            },
+            {
+              "name": "deposited_at",
+              "type": "datetime",
+              "description": "[Deposited Timestamp] - Real deposit event time (from webhook/data).",
+              "nullable": false
+            },
+            {
+              "name": "reference_no",
+              "type": "string",
+              "description": "[Bank Reference No.] - External reference sent from bank/PG for duplicate detection; atomic string.",
+              "nullable": false
+            },
+            {
+              "name": "status",
+              "type": "string",
+              "description": "[Processing Status] - 'PENDING', 'MATCHED', 'ERROR'. Required for dashboard and alarm. 3NF strictly enforced.",
+              "nullable": false
+            },
+            {
+              "name": "created_at",
+              "type": "datetime",
+              "description": "[Created Timestamp] - When the record is entered; supports late/delayed events.",
+              "nullable": false
+            }
+          ],
+          "uniqueIndexes": [
+            {
+              "fieldNames": [
+                "reference_no",
+                "virtual_account_id"
+              ],
+              "unique": true
+            }
+          ],
+          "plainIndexes": [
+            {
+              "fieldNames": [
+                "virtual_account_id",
+                "deposited_at"
+              ]
+            }
+          ],
+          "ginIndexes": []
+        },
+        {
+          "name": "virtual_account_deposit_matchings",
+          "description": "[Deposit Matching Log Table] - Implements requirement for tracking all attempts to auto-match or manually match deposit events to customers/orders. Fully normalized; one row per actual matching event, with before/after, never summary.\n\nUsed in: audit trails, error diagnosis, reprocessing. Never stores aggregation or computed counts. \n\nKey relationships: references deposit and admin (actor).",
+          "material": false,
+          "primaryField": {
+            "name": "id",
+            "type": "uuid",
+            "description": "Primary Key. Unique row for every matching attempt."
+          },
+          "foreignFields": [
+            {
+              "name": "deposit_id",
+              "type": "uuid",
+              "description": "References deposit to be matched. Required for traceability. Target: virtual_account_deposits.id.",
+              "relation": {
+                "name": "deposit",
+                "targetModel": "virtual_account_deposits"
+              },
+              "unique": false,
+              "nullable": false
+            },
+            {
+              "name": "admin_id",
+              "type": "uuid",
+              "description": "References admin who performed the matching (auto/manual); required for audit trail. Target: virtual_account_admins.id.",
+              "relation": {
+                "name": "admin",
+                "targetModel": "virtual_account_admins"
+              },
+              "unique": false,
+              "nullable": false
+            }
+          ],
+          "plainFields": [
+            {
+              "name": "matched_customer_id",
+              "type": "uuid",
+              "description": "[Matched Customer ID] - Atomic UUID to track which customer got assigned via matching. Normalized (not derived from join/calc).",
+              "nullable": false
+            },
+            {
+              "name": "matched_at",
+              "type": "datetime",
+              "description": "[Matched Timestamp] - When the matching occurred; always actual event time. 3NF; nulls not allowed. Example: '2025-06-16T11:05:00+09:00'",
+              "nullable": false
+            },
+            {
+              "name": "matching_method",
+              "type": "string",
+              "description": "[Matching Method] - 'AUTOMATIC' or 'MANUAL'. String lookup; not computed. For audit and dashboard logic.",
+              "nullable": false
+            },
+            {
+              "name": "reason",
+              "type": "string",
+              "description": "[Matching Reason] - Administrator/auto-comment for audit, if available. Not null (empty if no reason).",
+              "nullable": false
+            }
+          ],
+          "uniqueIndexes": [],
+          "plainIndexes": [
+            {
+              "fieldNames": [
+                "deposit_id",
+                "matched_at"
+              ]
+            }
+          ],
+          "ginIndexes": []
+        },
+        {
+          "name": "virtual_account_deposit_errors",
+          "description": "[Deposit Error Log] - Implements strict audit and error handling requirement for deposits that failed matching or processing. Fully normalized; no denormalized fields.\n\nBusiness use: Error diagnosis workflow for admin dashboard, alarm triggers, reprocessing scanner jobs. No summary/aggregate. \n\nKey relationships: references deposit and admin (actor).",
+          "material": false,
+          "primaryField": {
+            "name": "id",
+            "type": "uuid",
+            "description": "Primary Key. Unique key for deposit error record."
+          },
+          "foreignFields": [
+            {
+              "name": "deposit_id",
+              "type": "uuid",
+              "description": "References failed deposit event. Used for error diagnosis and alarm reporting. Target: virtual_account_deposits.id.",
+              "relation": {
+                "name": "deposit",
+                "targetModel": "virtual_account_deposits"
+              },
+              "unique": false,
+              "nullable": false
+            },
+            {
+              "name": "admin_id",
+              "type": "uuid",
+              "description": "References admin actor who classified or handled the error. Target: virtual_account_admins.id.",
+              "relation": {
+                "name": "admin",
+                "targetModel": "virtual_account_admins"
+              },
+              "unique": false,
+              "nullable": true
+            }
+          ],
+          "plainFields": [
+            {
+              "name": "error_code",
+              "type": "string",
+              "description": "[Error Code] - Business or system error code that classifies the cause; e.g., 'AMOUNT_NOT_MATCH', 'ACCOUNT_EXPIRED'. Never aggregation.",
+              "nullable": false
+            },
+            {
+              "name": "error_message",
+              "type": "string",
+              "description": "[Error Message] - Free text describing error. Required for audit. 3NF.",
+              "nullable": false
+            },
+            {
+              "name": "error_detail",
+              "type": "string",
+              "description": "[Error Detail] - Any developer system detail (raw JSON/text). Null allowed. Not derived/calc.",
+              "nullable": true
+            },
+            {
+              "name": "occurred_at",
+              "type": "datetime",
+              "description": "[Occurred Timestamp] - Point-in-time for error for strict sequencing. Not null.",
+              "nullable": false
+            }
+          ],
+          "uniqueIndexes": [],
+          "plainIndexes": [
+            {
+              "fieldNames": [
+                "deposit_id",
+                "occurred_at"
+              ]
+            }
+          ],
+          "ginIndexes": []
+        }
+      ]
+    },
+    {
+      "filename": "schema-03-notifications_and_logs.prisma",
+      "namespace": "NotificationsAndLogs",
+      "models": [
+        {
+          "name": "virtual_account_notifications",
+          "description": "Notification main entity - Implements alerting requirements for deposits, failures, expiration, and admin alerts as described in the requirements. \n\nProvides core storage and processing for notification events in the virtual account system, separating atomic event data from content/template logic, fully normalized (3NF). For example, every time a deposit status or exceptional event occurs, a row is created here, pointing to channels, templates, and recipient entities. \n\nKey relationships: linked to notification templates, channels, recipients (via customer/admin/super_admin, FK referencing not shown here), notification event logs. \nSpecial behaviors: must not store pre-rendered or denormalized message content, only relationships and atomic event metadata.",
+          "material": false,
+          "primaryField": {
+            "name": "id",
+            "type": "uuid",
+            "description": "Primary Key. Unique notification event identifier."
+          },
+          "foreignFields": [
+            {
+              "name": "notification_template_id",
+              "type": "uuid",
+              "description": "Used template's {@link virtual_account_notification_templates.id}. Indicates the content structure for this event.",
+              "relation": {
+                "name": "template",
+                "targetModel": "virtual_account_notification_templates"
+              },
+              "unique": false,
+              "nullable": false
+            },
+            {
+              "name": "notification_channel_id",
+              "type": "uuid",
+              "description": "Notification channel used {@link virtual_account_notification_channels.id}. Records the physical channel used (kakao, email, sms, etc).",
+              "relation": {
+                "name": "channel",
+                "targetModel": "virtual_account_notification_channels"
+              },
+              "unique": false,
+              "nullable": false
+            }
+          ],
+          "plainFields": [
+            {
+              "name": "event_type",
+              "type": "string",
+              "description": "Type of notification trigger. Implements alerting conditions from requirements (DEPOSIT_CONFIRMED, DEPOSIT_FAIL, EXPIRED, ADMIN_ALERT, etc). Normalized to represent just the event type. For example: used in deciding which template/channel to route. Enforces system event-traceability.",
+              "nullable": false
+            },
+            {
+              "name": "recipient_id",
+              "type": "uuid",
+              "description": "Recipient of the notification (could be customer/admin/super_admin depending on event). Implements multi-actor notification tracking from requirements. Fully normalized as atomic reference (actual FK varies in other files, but always UUID). For example: customer receives deposit notification, admin receives system alert.",
+              "nullable": false
+            },
+            {
+              "name": "status",
+              "type": "string",
+              "description": "Current status code of the notification (ex: SENT, DELIVERED, FAILED, RETRY_PENDING). Implements notification flow/status tracking requirement. Ensures atomic status handling, 3NF: does not include any aggregate counts or histories.",
+              "nullable": false
+            },
+            {
+              "name": "requested_at",
+              "type": "datetime",
+              "description": "When this notification event was triggered/generated. Fulfills event auditability and notification timeline requirements. For example: match notification event with corresponding deposit or error.",
+              "nullable": false
+            },
+            {
+              "name": "sent_at",
+              "type": "datetime",
+              "description": "When the notification was sent out from system to channel. Atomic timestamp, never derived/calculated. Enables step-by-step auditing of notification flow/latency.",
+              "nullable": true
+            },
+            {
+              "name": "delivered_at",
+              "type": "datetime",
+              "description": "Time notification was delivered/confirmed by final channel provider. Fulfills audit/reporting requirements for delivery status. Null for failed/unknown.",
+              "nullable": true
+            }
+          ],
+          "uniqueIndexes": [
+            {
+              "fieldNames": [
+                "recipient_id",
+                "event_type",
+                "requested_at"
+              ],
+              "unique": true
+            }
+          ],
+          "plainIndexes": [
+            {
+              "fieldNames": [
+                "status",
+                "requested_at"
+              ]
+            },
+            {
+              "fieldNames": [
+                "notification_channel_id",
+                "requested_at"
+              ]
+            }
+          ],
+          "ginIndexes": []
+        },
+        {
+          "name": "virtual_account_notification_templates",
+          "description": "Notification template master - Implements the message formatting/content structure requirement for various notification events, as separated in requirements docs. \n\nStores the format, language, and template variables for all notifications (atomic template data, not rendered/personalized content). Fully normalized (3NF): message variables and template versions kept separate. For example, a new deposit notification type or template update adds a row here, not in notification event log.\n\nKey relationships: referenced by notification events.\nSpecial behaviors: does not include recipient/user data, only template structure.",
+          "material": false,
+          "primaryField": {
+            "name": "id",
+            "type": "uuid",
+            "description": "Primary Key."
+          },
+          "foreignFields": [],
+          "plainFields": [
+            {
+              "name": "template_code",
+              "type": "string",
+              "description": "Logical code or key for this template (e.g., 'DEPOSIT_CONFIRMED_KAKAO'). Implements notification type-to-template mapping requirement. Fully normalized: no duplicate content, only template reference per type/channel.",
+              "nullable": false
+            },
+            {
+              "name": "channel_type",
+              "type": "string",
+              "description": "Notification channel type this template is for (kakao, email, sms, etc). Required for multi-channel template support as described in requirements (ex: event has both kakao and email).",
+              "nullable": false
+            },
+            {
+              "name": "title",
+              "type": "string",
+              "description": "Notification template title or subject. Business requirement for email/sms subject lines (actual content rendered per event); atomic data, not derived.",
+              "nullable": false
+            },
+            {
+              "name": "body_format",
+              "type": "string",
+              "description": "Format style (e.g., text, html, markdown). Implements support for different channel requirements as described in requirements.",
+              "nullable": false
+            },
+            {
+              "name": "body_template",
+              "type": "string",
+              "description": "Templated message body (with variable placeholders). Required by template-driven notification logic in requirements docs.",
+              "nullable": false
+            },
+            {
+              "name": "language_code",
+              "type": "string",
+              "description": "Language identifier for template localization (e.g., 'ko', 'en'). Normalized support for multi-language requirements in templates.",
+              "nullable": false
+            },
+            {
+              "name": "version",
+              "type": "int",
+              "description": "Version number of template. Supports audit trails/non-destructive updates for template changes, requirement: historical template access/logging.",
+              "nullable": false
+            },
+            {
+              "name": "is_active",
+              "type": "boolean",
+              "description": "Whether the template is active and available for notification linkage. Business requirement for template enable/disable via admin panel; keeps atomic template state.",
+              "nullable": false
+            }
+          ],
+          "uniqueIndexes": [
+            {
+              "fieldNames": [
+                "template_code",
+                "channel_type",
+                "language_code",
+                "version"
+              ],
+              "unique": true
+            }
+          ],
+          "plainIndexes": [
+            {
+              "fieldNames": [
+                "is_active"
+              ]
+            }
+          ],
+          "ginIndexes": [
+            {
+              "fieldName": "title"
+            },
+            {
+              "fieldName": "body_template"
+            }
+          ]
+        },
+        {
+          "name": "virtual_account_notification_channels",
+          "description": "Notification channel master table - Implements the requirement to manage physical and logical notification channels (kakao톡, email, sms, etc) as independently manageable resources. \n\nEach channel entity represents a delivery medium, allowing channel status, credentials, or settings to be managed and referenced atomically per event. Complies with 3NF: no denormalized configuration in notification events. For example, disabling a channel due to provider issue disables all related notifications; all notification events reference this table only by FK.\n\nKey relationships: referenced by notification events, templates.\nSpecial behaviors: used for admin toggling of channel availability.",
+          "material": false,
+          "primaryField": {
+            "name": "id",
+            "type": "uuid",
+            "description": "Primary Key."
+          },
+          "foreignFields": [],
+          "plainFields": [
+            {
+              "name": "channel_type",
+              "type": "string",
+              "description": "Physical/logical channel type identifier (kakao, email, sms, friendtalk, etc). Implements multi-channel notification support. Only single, atomic channel type per row, in line with normalization.",
+              "nullable": false
+            },
+            {
+              "name": "display_name",
+              "type": "string",
+              "description": "Display name of channel for admin console. Implemented for business/UX requirement: read-friendly representation in settings.",
+              "nullable": false
+            },
+            {
+              "name": "is_active",
+              "type": "boolean",
+              "description": "Whether the channel can be currently used for sending. Business/admin requirement for toggling channels on/off system-wide; atomic boolean, no derived statuses.",
+              "nullable": false
+            },
+            {
+              "name": "settings_json",
+              "type": "string",
+              "description": "JSON document representing provider credentials, config, sender, quotas, etc. Required for extensible per-channel config management; keeps configuration atomic and normalized. (No denormalized/cached tokens here.) Example: storing SMTP/Kakao API key set per channel row.",
+              "nullable": false
+            }
+          ],
+          "uniqueIndexes": [
+            {
+              "fieldNames": [
+                "channel_type"
+              ],
+              "unique": true
+            }
+          ],
+          "plainIndexes": [
+            {
+              "fieldNames": [
+                "is_active"
+              ]
+            }
+          ],
+          "ginIndexes": [
+            {
+              "fieldName": "display_name"
+            }
+          ]
+        },
+        {
+          "name": "virtual_account_notification_event_logs",
+          "description": "Per-event notification status log - Implements per-event, per-recipient audit logging for notification events as required for dashboard, history, and troubleshooting features. \n\nTracks all delivery attempts, bounces, state changes for notifications (atomic log line per attempt/status). Fulfills audit, dashboard, and retry condition requirements. 3NF: No duplicate or aggregate state per notification, just log entries referencing their subjects.\n\nKey relationships: notification_id FK to notification events; referenced by dashboard/history/reporting queries.\nSpecial behaviors: may be cleaned-up/archived per policy.",
+          "material": false,
+          "primaryField": {
+            "name": "id",
+            "type": "uuid",
+            "description": "Primary Key."
+          },
+          "foreignFields": [
+            {
+              "name": "notification_id",
+              "type": "uuid",
+              "description": "Referenced notification's {@link virtual_account_notifications.id}. Implements requirement for log-by-notification linkage.",
+              "relation": {
+                "name": "notification",
+                "targetModel": "virtual_account_notifications"
+              },
+              "unique": false,
+              "nullable": false
+            }
+          ],
+          "plainFields": [
+            {
+              "name": "status",
+              "type": "string",
+              "description": "Delivery attempt status (e.g., SENT, DELIVERED, FAILED, RETRY, BOUNCED, EXPIRED). Implements per-attempt/result log tracking for notification delivery - requirement: all history preserved, fully normalized, no aggregates here.",
+              "nullable": false
+            },
+            {
+              "name": "detail",
+              "type": "string",
+              "description": "Optional description/detail for this status attempt (error message, provider id, etc). For business/audit/ops needs: fully atomic log context per status/event.",
+              "nullable": true
+            },
+            {
+              "name": "logged_at",
+              "type": "datetime",
+              "description": "Timestamp when this log entry was created. Implements reporting/auditing requirements; normalized atomic event log. For example, enables precise timeline on dashboard/statistics.",
+              "nullable": false
+            }
+          ],
+          "uniqueIndexes": [],
+          "plainIndexes": [
+            {
+              "fieldNames": [
+                "notification_id",
+                "logged_at"
+              ]
+            },
+            {
+              "fieldNames": [
+                "status"
+              ]
+            }
+          ],
+          "ginIndexes": []
+        },
+        {
+          "name": "virtual_account_audit_logs",
+          "description": "System-wide audit log table - Implements cross-cutting requirement (07_virtual_account_security.md, dashboard, admin UX etc) to record sensitive operations and access for all users. \n\nStores atomic, non-derived events (login, permission change, downloads, etc). Fully normalized per event; aggregates only in materialized views. For example: all admin role change, Excel export, 2FA triggers logged here.\n\nKey relationships: may reference various entities by 'actor_id' (customer/admin/super_admin), and target feature by 'target_type'/'target_id'.\nSpecial behaviors: Rationalizes event retention for audit/forensics.",
+          "material": false,
+          "primaryField": {
+            "name": "id",
+            "type": "uuid",
+            "description": "Primary Key."
+          },
+          "foreignFields": [],
+          "plainFields": [
+            {
+              "name": "actor_id",
+              "type": "uuid",
+              "description": "User who performed the action. Implements requirement for audit trail for all critical ops: always normalized as actor UUID. Could refer to any actor-type. For example, admin modifies role.",
+              "nullable": false
+            },
+            {
+              "name": "actor_type",
+              "type": "string",
+              "description": "Classifies kind of actor/user performing action (customer/admin/super_admin, etc). Requirement for mixed-role security/audit; always atomic string category.",
+              "nullable": false
+            },
+            {
+              "name": "event_type",
+              "type": "string",
+              "description": "Type of audit event (login, 2fa_trigger, permission_change, export, etc). Fulfills requirement to classify audit actions for drills and reporting.",
+              "nullable": false
+            },
+            {
+              "name": "target_type",
+              "type": "string",
+              "description": "Classification of resource affected (account, deposit, notification, system, etc). Normalized categorical, enables structured querying.",
+              "nullable": false
+            },
+            {
+              "name": "target_id",
+              "type": "uuid",
+              "description": "ID of resource acted on (referenced object, if any). Requirement from dashboard/detail audit feature.",
+              "nullable": true
+            },
+            {
+              "name": "description",
+              "type": "string",
+              "description": "Human/audit readable detail of event (can be null for system/anonymous events). For compliance/forensics/business audit needs; atomic, not derived/replicated.",
+              "nullable": true
+            },
+            {
+              "name": "occurred_at",
+              "type": "datetime",
+              "description": "Atomic UTC timestamp when action occurred. Required for all transparency/security requirement scenarios.",
+              "nullable": false
+            }
+          ],
+          "uniqueIndexes": [
+            {
+              "fieldNames": [
+                "actor_id",
+                "event_type",
+                "occurred_at"
+              ],
+              "unique": true
+            }
+          ],
+          "plainIndexes": [
+            {
+              "fieldNames": [
+                "occurred_at"
+              ]
+            }
+          ],
+          "ginIndexes": []
+        },
+        {
+          "name": "virtual_account_security_logs",
+          "description": "Security incident/event log - Implements all 07_virtual_account_security.md requirements for detailed monitoring/forensic record of sensitive security-related events (login failure, otp trigger, invalid access, api abuse, etc). \n\nData stored is strictly atomic/fully normalized for each event; aggregates only in views. For example: failed login causes a security log row to be written here, distinct from audit log.\n\nKey relationships: references actor_id for user details, links to event source/resource via optional IDs. Administrators can query or trigger alerts as needed.\nSpecial behaviors: may be purged/archived as required by business/policy.",
+          "material": false,
+          "primaryField": {
+            "name": "id",
+            "type": "uuid",
+            "description": "Primary Key."
+          },
+          "foreignFields": [],
+          "plainFields": [
+            {
+              "name": "actor_id",
+              "type": "uuid",
+              "description": "Person/system who triggered the event (customer/admin/super_admin, etc). Implements normalized actor-ref for incident tracking, requirement for all security-related events in forensics.",
+              "nullable": false
+            },
+            {
+              "name": "actor_type",
+              "type": "string",
+              "description": "Category of actor ('customer', 'admin', 'super_admin', 'system', etc). Implements cross-type security incident tracking.",
+              "nullable": false
+            },
+            {
+              "name": "event_type",
+              "type": "string",
+              "description": "Security event classification (login_fail, otp_fail, unauthorized_access, key_rotation, api_throttle, etc). Fulfills requirement for granular security audit, reporting, and alerting. Atomic category, never redundant or denormalized.",
+              "nullable": false
+            },
+            {
+              "name": "ip",
+              "type": "string",
+              "description": "IP address (if available) of event instigator. Requirement for security incident trace/audit; atomic string, not composite. For example, needed for geo-audit/ban activities.",
+              "nullable": true
+            },
+            {
+              "name": "resource_type",
+              "type": "string",
+              "description": "Type of target resource affected (account, oauth_client, hmac_key, notification, deposit, etc). Just a simple code; no aggregates or calculated fields, conforms to normalization.",
+              "nullable": false
+            },
+            {
+              "name": "resource_id",
+              "type": "uuid",
+              "description": "ID of resource object. Allows for flexible, normalized relation for security event tracking.",
+              "nullable": true
+            },
+            {
+              "name": "detail",
+              "type": "string",
+              "description": "Optional event context/message (stacktrace, error, extra info for forensics). For requirements on check/analysis of security event details.",
+              "nullable": true
+            },
+            {
+              "name": "occurred_at",
+              "type": "datetime",
+              "description": "ISO UTC timestamp of when the event took place. Implements temporal and order of events requirement from security documentation. Used in all incident and root cause analysis workflows.",
+              "nullable": false
+            }
+          ],
+          "uniqueIndexes": [
+            {
+              "fieldNames": [
+                "actor_id",
+                "event_type",
+                "occurred_at"
+              ],
+              "unique": true
+            }
+          ],
+          "plainIndexes": [
+            {
+              "fieldNames": [
+                "occurred_at"
+              ]
+            },
+            {
+              "fieldNames": [
+                "event_type"
+              ]
+            }
+          ],
+          "ginIndexes": []
+        }
+      ]
+    },
+    {
+      "filename": "schema-04-external_integration.prisma",
+      "namespace": "ExternalIntegration",
+      "models": [
+        {
+          "name": "virtual_account_external_systems",
+          "description": "External Systems Registry - This model implements the requirement to support dynamic integration with external platforms (ERP, Mall, Bank/PG) from requirement sections 4.2/4.3/8. Each record represents a unique external system with configuration. Maintains 3NF as all attributes depend solely on the primary key. Example: Cafe24 Mall, DOUZONE ERP, KG Inicis. Key relationships: referenced by sync and log tables. Special behaviors: Ensures integrations are managed and identifiable.",
+          "material": false,
+          "primaryField": {
+            "name": "id",
+            "type": "uuid",
+            "description": "Primary Key."
+          },
+          "foreignFields": [],
+          "plainFields": [
+            {
+              "name": "system_type",
+              "type": "string",
+              "description": "Type of external system (e.g., 'ERP', 'MALL', 'BANK', 'PG'). Implements requirement for multi-type integration. Ensures normalization by atomic string, no redundant arrays. Example: 'ERP'.",
+              "nullable": false
+            },
+            {
+              "name": "name",
+              "type": "string",
+              "description": "Display name of the system. Used for screens, logs, and configuration. Maintains normalization; no derived values. Example: 'Cafe24', 'DOUZONE iCUBE'.",
+              "nullable": false
+            },
+            {
+              "name": "api_base_url",
+              "type": "uri",
+              "description": "Base URL of external API endpoint. Implements connectivity requirement. Ensures normalization by not caching responses. Example: 'https://erp.example.com/api/'.",
+              "nullable": false
+            },
+            {
+              "name": "enabled",
+              "type": "boolean",
+              "description": "If this integration is enabled. Used for admin toggle on/off. 1NF: atomic flag. Example: true.",
+              "nullable": false
+            },
+            {
+              "name": "created_at",
+              "type": "datetime",
+              "description": "Record creation timestamp. For auditing and requirement traceability. Example: '2025-06-16T08:10:56.739Z'.",
+              "nullable": false
+            },
+            {
+              "name": "updated_at",
+              "type": "datetime",
+              "description": "Last update timestamp. Used for sync and admin page. 3NF: Direct property of record. Example: '2025-06-16T08:10:56.739Z'.",
+              "nullable": false
+            }
+          ],
+          "uniqueIndexes": [
+            {
+              "fieldNames": [
+                "system_type",
+                "name"
+              ],
+              "unique": true
+            }
+          ],
+          "plainIndexes": [],
+          "ginIndexes": []
+        },
+        {
+          "name": "virtual_account_external_integration_logs",
+          "description": "External Integration Event Logs - Implements audit and traceability of all data exchanges with external systems (see requirements 4.3/5/8). Example: every API call result, sync fail, or push event. Maintains 3NF—no aggregation, each log depends on a single integration event. Usage: admin troubleshooting, compliance evidence. Key relationship: references external system. Special behaviors: Immutable logs.",
+          "material": false,
+          "primaryField": {
+            "name": "id",
+            "type": "uuid",
+            "description": "Primary Key."
+          },
+          "foreignFields": [
+            {
+              "name": "external_system_id",
+              "type": "uuid",
+              "description": "External system's {@link virtual_account_external_systems.id}. Fulfills requirement for system-level traceability. Enforces referential integrity; no orphan logs.",
+              "relation": {
+                "name": "external_system",
+                "targetModel": "virtual_account_external_systems"
+              },
+              "unique": false,
+              "nullable": false
+            }
+          ],
+          "plainFields": [
+            {
+              "name": "event_type",
+              "type": "string",
+              "description": "Integration event type (e.g., 'SYNC', 'PUSH', 'FAIL'). Provides normalization by using controlled vocabularies for log analytics. Example: 'SYNC'.",
+              "nullable": false
+            },
+            {
+              "name": "request_payload",
+              "type": "string",
+              "description": "Raw request sent to the external system. For full trace/audit compliance. Maintains atomicity. Example: JSON body.",
+              "nullable": false
+            },
+            {
+              "name": "response_payload",
+              "type": "string",
+              "description": "Raw response received. For after-the-fact troubleshooting or compliance. Not pre-parsed/processed.",
+              "nullable": true
+            },
+            {
+              "name": "success",
+              "type": "boolean",
+              "description": "Indicates if the event was successful. Used for admin alert logic and retry rules. Atomic boolean, normalized. Example: false.",
+              "nullable": false
+            },
+            {
+              "name": "error_message",
+              "type": "string",
+              "description": "Error description if failed. Null if success=true. 3NF: property of the event. Example: 'Timeout'.",
+              "nullable": true
+            },
+            {
+              "name": "created_at",
+              "type": "datetime",
+              "description": "Time of event log creation. Used for admin ordering and analytics. Example: '2025-06-16T08:10:56.739Z'.",
+              "nullable": false
+            }
+          ],
+          "uniqueIndexes": [],
+          "plainIndexes": [
+            {
+              "fieldNames": [
+                "external_system_id",
+                "created_at"
+              ]
+            }
+          ],
+          "ginIndexes": []
+        },
+        {
+          "name": "virtual_account_erp_types",
+          "description": "ERP Type Dictionary - Implements requirement from external integration (section 4.2) to support multiple ERP platforms. Each record is a supported ERP vendor/type. Maintains normalization; no redundant codes. Used in foreign keys from erp sync log. Example: DOUZONE, SAP. Key: referenced by erp sync records.",
+          "material": false,
+          "primaryField": {
+            "name": "id",
+            "type": "uuid",
+            "description": "Primary Key."
+          },
+          "foreignFields": [],
+          "plainFields": [
+            {
+              "name": "code",
+              "type": "string",
+              "description": "Unique short code for ERP type. Example: 'DOUZON', 'SAP'. Used for validation; 3NF compliance; enforces acceptance of new ERP partners.",
+              "nullable": false
+            },
+            {
+              "name": "display_name",
+              "type": "string",
+              "description": "Human-readable name. Used on UX and logs. Example: '더존 iCUBE'.",
+              "nullable": false
+            },
+            {
+              "name": "created_at",
+              "type": "datetime",
+              "description": "Record creation time. Example: '2025-06-16T08:10:56.739Z'.",
+              "nullable": false
+            }
+          ],
+          "uniqueIndexes": [
+            {
+              "fieldNames": [
+                "code"
+              ],
+              "unique": true
+            }
+          ],
+          "plainIndexes": [],
+          "ginIndexes": [
+            {
+              "fieldName": "display_name"
+            }
+          ]
+        },
+        {
+          "name": "virtual_account_erp_syncs",
+          "description": "ERP Sync Outbound Log - Implements data transfer history from requirement 4.4/4.5. Each row is a transmission log to an ERP system. Example: 'order_id=1', 'status=COMPLETE', 'DUZON'. Maintains 3NF by storing record per outbound payload. Usage: troubleshooting, compliance, and ER integration. Relationships: references an ERP type and an external system.",
+          "material": false,
+          "primaryField": {
+            "name": "id",
+            "type": "uuid",
+            "description": "Primary Key."
+          },
+          "foreignFields": [
+            {
+              "name": "erp_type_id",
+              "type": "uuid",
+              "description": "ERP Type's {@link virtual_account_erp_types.id}. Implements support for multiple ERP. Enforces referential integrity.",
+              "relation": {
+                "name": "erp_type",
+                "targetModel": "virtual_account_erp_types"
+              },
+              "unique": false,
+              "nullable": false
+            },
+            {
+              "name": "external_system_id",
+              "type": "uuid",
+              "description": "External system this sync targets. Enforces system-level sync mapping. References {@link virtual_account_external_systems.id}.",
+              "relation": {
+                "name": "external_system",
+                "targetModel": "virtual_account_external_systems"
+              },
+              "unique": false,
+              "nullable": false
+            }
+          ],
+          "plainFields": [
+            {
+              "name": "payload",
+              "type": "string",
+              "description": "Raw outbound data payload, atomic per sync. Maintains normalization. Example: JSON payload sent to ERP.",
+              "nullable": false
+            },
+            {
+              "name": "result_status",
+              "type": "string",
+              "description": "Result of this outbound operation, e.g. 'SUCCESS', 'FAIL'. Enables admin filtering. Not computed.",
+              "nullable": false
+            },
+            {
+              "name": "error_message",
+              "type": "string",
+              "description": "Populated on failure only. Null if status=SUCCESS. For support. Maintains 3NF.",
+              "nullable": true
+            },
+            {
+              "name": "created_at",
+              "type": "datetime",
+              "description": "Time of sync event. 3NF property. Example: '2025-06-16T08:10:56.739Z'.",
+              "nullable": false
+            }
+          ],
+          "uniqueIndexes": [],
+          "plainIndexes": [
+            {
+              "fieldNames": [
+                "erp_type_id",
+                "created_at"
+              ]
+            },
+            {
+              "fieldNames": [
+                "external_system_id",
+                "created_at"
+              ]
+            }
+          ],
+          "ginIndexes": []
+        },
+        {
+          "name": "virtual_account_mall_syncs",
+          "description": "Mall Sync Outbound Log - This implements the requirement to track all outbound webhooks/API pushes to mall systems (Cafe24, 고도몰 등), see requirement 4.4. Each row is one transmission event. Maintains 3NF. Supports troubleshooting in admin dashboard. Key relationships: references external system only.",
+          "material": false,
+          "primaryField": {
+            "name": "id",
+            "type": "uuid",
+            "description": "Primary Key."
+          },
+          "foreignFields": [
+            {
+              "name": "external_system_id",
+              "type": "uuid",
+              "description": "Mall system reference {@link virtual_account_external_systems.id}. Maintains referential integrity for outbound mall pushes.",
+              "relation": {
+                "name": "external_system",
+                "targetModel": "virtual_account_external_systems"
+              },
+              "unique": false,
+              "nullable": false
+            }
+          ],
+          "plainFields": [
+            {
+              "name": "order_id",
+              "type": "string",
+              "description": "Order ID sent to mall; atomic string. Example: 'ORD20240601-18'. Fulfills order mapping requirement. Not derived.",
+              "nullable": false
+            },
+            {
+              "name": "payload",
+              "type": "string",
+              "description": "Raw outbound payload sent to external system. Maintains normalization.",
+              "nullable": false
+            },
+            {
+              "name": "response",
+              "type": "string",
+              "description": "Response from external system. Not preprocessed, stored atomic per sync event for audit.",
+              "nullable": true
+            },
+            {
+              "name": "result_status",
+              "type": "string",
+              "description": "Result: 'SUCCESS', 'FAIL', etc. Enables filtering in dashboard. Maintains 3NF.",
+              "nullable": false
+            },
+            {
+              "name": "error_message",
+              "type": "string",
+              "description": "Error message if failure only. Null if status is 'SUCCESS'.",
+              "nullable": true
+            },
+            {
+              "name": "created_at",
+              "type": "datetime",
+              "description": "Time of sync. Key field for temporal queries.",
+              "nullable": false
+            }
+          ],
+          "uniqueIndexes": [],
+          "plainIndexes": [
+            {
+              "fieldNames": [
+                "external_system_id",
+                "order_id"
+              ]
+            },
+            {
+              "fieldNames": [
+                "created_at"
+              ]
+            }
+          ],
+          "ginIndexes": []
+        }
+      ]
+    },
+    {
+      "filename": "schema-05-admin_dashboard_and_settings.prisma",
+      "namespace": "AdminDashboardAndSettings",
+      "models": [
+        {
+          "name": "virtual_account_dashboard_settings",
+          "description": "[Admin Dashboard Settings] - This implements the '대시보드 기본 환경/설정 저장' requirement from the 관리대시보드 명세 문서 (06_virtual_account_admin_dashboard.md). \n\nDefines dashboard personalization and environment settings for individual admins (such as preferred filters, default landing tabs, notification options, table column selection, and saved UI states). Maintains 3NF by isolating user-specific dashboard configurations, ensuring no redundant storage across admins or global config. For example, when an admin changes their default filter (e.g., status=DEPOSIT_WAITING), it's remembered per user. \n\nKey relationships: Belongs to a specific admin. \nSpecial behaviors: Each admin can only have one dashboard setting (enforced by unique foreign key), changes are auditable. Settings stored as JSONB blob for extensibility, but no calculated summary fields stored here.",
+          "material": false,
+          "primaryField": {
+            "name": "id",
+            "type": "uuid",
+            "description": "Primary Key. Unique identifier for the dashboard settings record."
+          },
+          "foreignFields": [
+            {
+              "name": "virtual_account_admin_id",
+              "type": "uuid",
+              "description": "Belonged admin's {@link virtual_account_admins.id}.\nRelates to the admin account that owns this dashboard settings entry.",
+              "relation": {
+                "name": "admin",
+                "targetModel": "virtual_account_admins"
+              },
+              "unique": true,
+              "nullable": false
+            }
+          ],
+          "plainFields": [
+            {
+              "name": "settings_json",
+              "type": "string",
+              "description": "[Serialized dashboard settings] - Implements extensible user-specific options. \n\nStores dashboard configuration (view filters, UI state, notification preference, etc.) serialized as JSONB. Fully atomic for the record as per 1NF—no repeating groups, and extensibility is assured without denormalization. For example, {'defaultTab':'settlements','filters':{'status':'ALL'}}.\nMust be a valid JSON string. No summary/pre-calculated data allowed.",
+              "nullable": false
+            },
+            {
+              "name": "created_at",
+              "type": "datetime",
+              "description": "[Creation timestamp] - Implements creation audit trail requirement.\n\nIndicates when the dashboard setting was created. Ensures normalization by keeping time tracking atomic and single-purpose. For example, enables UI to sort/admins to audit settings history.",
+              "nullable": false
+            },
+            {
+              "name": "updated_at",
+              "type": "datetime",
+              "description": "[Last update timestamp] - Supports audit trail for dashboard preference changes.\n\nAtomic timestamp indicating the most recent update of the settings.",
+              "nullable": false
+            }
+          ],
+          "uniqueIndexes": [],
+          "plainIndexes": [
+            {
+              "fieldNames": [
+                "virtual_account_admin_id"
+              ]
+            }
+          ],
+          "ginIndexes": []
+        },
+        {
+          "name": "virtual_account_excel_exports",
+          "description": "[Excel Export Metadata] - Implements the 관리자 대시보드 '엑셀 다운로드 및 이력 관리' requirement from 06_virtual_account_admin_dashboard.md.\n\nStores log of when/what data was exported to Excel by which admin, to meet compliance and traceability requirements. Maintains 3NF by storing each export event as a separate atomic record (no pre-calculated summaries). For instance, when filtering 입금대기 건 and downloading the Excel, a record is written here.\n\nKey relationships: Linked to the exporting admin. \nSpecial behaviors: Stores only export metadata, not actual Excel files. Success/failure and type tracked atomically.",
+          "material": false,
+          "primaryField": {
+            "name": "id",
+            "type": "uuid",
+            "description": "Primary Key."
+          },
+          "foreignFields": [
+            {
+              "name": "virtual_account_admin_id",
+              "type": "uuid",
+              "description": "Admin who triggered the export ({@link virtual_account_admins.id}).\nConnects export history to admin profile for compliance.",
+              "relation": {
+                "name": "admin",
+                "targetModel": "virtual_account_admins"
+              },
+              "unique": false,
+              "nullable": false
+            }
+          ],
+          "plainFields": [
+            {
+              "name": "export_type",
+              "type": "string",
+              "description": "[Export type/category] - Implements export context requirement. \n\nIndicates what kind of data was exported (eg. DEPOSIT_HISTORY, ACCOUNT_STATUS, NOTIFICATIONS). Atomic string field (categorical). For example, 'DEPOSIT_HISTORY'.",
+              "nullable": false
+            },
+            {
+              "name": "filter_applied",
+              "type": "string",
+              "description": "[Serialized filter state] - Records which filters were used to create the export (e.g., date & status).\n\nAtomic JSON string. Maintains full normalization (no repeating groups) and traceability. E.g., {'status': 'COMPLETE', 'dateFrom': '2025-01-01'}.\n",
+              "nullable": false
+            },
+            {
+              "name": "requested_at",
+              "type": "datetime",
+              "description": "[Export request datetime] - Implements process tracking/auditing.\n\nAtomic timestamp for when export was requested by admin.",
+              "nullable": false
+            },
+            {
+              "name": "succeeded",
+              "type": "boolean",
+              "description": "[Export success flag] - Shows if export succeeded or errored. \n\nAtomic flag, no duplication. For example, failed download is tracked distinctly.",
+              "nullable": false
+            },
+            {
+              "name": "file_path",
+              "type": "uri",
+              "description": "[Export file location] - Where the generated export file can be retrieved (eg. S3 URL). May be null if the export failed.\nAtomic URI field, fully normalized.",
+              "nullable": true
+            }
+          ],
+          "uniqueIndexes": [],
+          "plainIndexes": [
+            {
+              "fieldNames": [
+                "virtual_account_admin_id",
+                "requested_at"
+              ]
+            }
+          ],
+          "ginIndexes": []
+        },
+        {
+          "name": "virtual_account_admin_alerts",
+          "description": "[Admin Alerts/Warnings] - Implements '이상 감지 경보/알림 이력' requirement from Admin Dashboard doc (06_virtual_account_admin_dashboard.md).\n\nTracks all critical alerts (예외 알림, 대량 미매칭, API 오류 등) presented to admins for visibility and compliance. Each alert is a fully normalized record (atomic, no aggregation or summary). For example, if 대량 미매칭이 감지되면 각 경보 건이 별도 row로 쌓임.\n\nKey relationships: Related to assigned admin (if specific; nullable for system-wide), can be referenced for audit. \nSpecial behaviors: Alert context/context_json allows rich detail, and clearable flag enables 'mark as read' functionality for admin UX.",
+          "material": false,
+          "primaryField": {
+            "name": "id",
+            "type": "uuid",
+            "description": "Primary Key."
+          },
+          "foreignFields": [
+            {
+              "name": "virtual_account_admin_id",
+              "type": "uuid",
+              "description": "Target admin for the alert ({@link virtual_account_admins.id}). If null, the alert is global or system-wide.\n\nAtomic nullable foreign key, per 3NF. Used for permission filtering and targeted alerting.",
+              "relation": {
+                "name": "admin",
+                "targetModel": "virtual_account_admins"
+              },
+              "unique": false,
+              "nullable": true
+            }
+          ],
+          "plainFields": [
+            {
+              "name": "alert_type",
+              "type": "string",
+              "description": "[Alert type/category] - Implements alert classification requirement.\n\nFor example: 'MASS_MISMATCH', 'EXTERNAL_ERROR', 'SECURITY_WARNING'. Atomic, non-null string. Used for filtering and analytics.",
+              "nullable": false
+            },
+            {
+              "name": "context_json",
+              "type": "string",
+              "description": "[Alert detail/context as JSON] - Implements contextual traceability of alert.\n\nAtomic JSON string storing custom data for the alert scenario (eg. involved accountId, error detail, threshold value). Fully normalized (no array of historical alerts on admins; all alerts are rows here).",
+              "nullable": false
+            },
+            {
+              "name": "notified_at",
+              "type": "datetime",
+              "description": "[When alert was generated/sent to admin] - Meets compliance for alert trail. Atomic, singular date.",
+              "nullable": false
+            },
+            {
+              "name": "clearable",
+              "type": "boolean",
+              "description": "[Clearable flag] - Marks if alert can be dismissed by admin (e.g., toggling 'read' status).\n\nAtomic flag, keeps UX state distinct. Allows UI to display unread/urgent items.",
+              "nullable": false
+            },
+            {
+              "name": "cleared_at",
+              "type": "datetime",
+              "description": "[Date alert was cleared by admin] - Implements UX-driven tracking for alert resolution. Nullable, null if still active.",
+              "nullable": true
+            }
+          ],
+          "uniqueIndexes": [],
+          "plainIndexes": [
+            {
+              "fieldNames": [
+                "virtual_account_admin_id",
+                "notified_at"
+              ]
+            }
+          ],
+          "ginIndexes": []
+        },
+        {
+          "name": "virtual_account_admin_activity_logs",
+          "description": "[Admin Action Log] - Implements 관리 이벤트 감사로그 저장 요구사항 (06_virtual_account_admin_dashboard.md, 07_virtual_account_security.md).\n\nRecords every major administrative action (예: 엑셀 다운로드, 권한 변경, 알림 정책 편집 등) for full auditability and compliance. This is a fully normalized, append-only log: each action is atomic, no denormalized aggregation or calculation. For example, updating a notification template, exporting data, or changing dashboard defaults all create distinct log entries here.\n\nKey relationships: Linked to admin performing the action. \nSpecial behaviors: Action type, context/entity/target, result, and IP are all atomic fields—not duplicated elsewhere. Action logs are immutable, only new records inserted.",
+          "material": false,
+          "primaryField": {
+            "name": "id",
+            "type": "uuid",
+            "description": "Primary Key. Fully unique per activity record."
+          },
+          "foreignFields": [
+            {
+              "name": "virtual_account_admin_id",
+              "type": "uuid",
+              "description": "Admin who performed the action ({@link virtual_account_admins.id}).\nMaintains traceable link for compliance monitoring.",
+              "relation": {
+                "name": "admin",
+                "targetModel": "virtual_account_admins"
+              },
+              "unique": false,
+              "nullable": false
+            }
+          ],
+          "plainFields": [
+            {
+              "name": "action_type",
+              "type": "string",
+              "description": "[Action type] - Implements action classification for audit.\n\nType/category of the admin action (e.g., 'EXPORT_EXCEL', 'NOTIFICATION_MANAGE', 'USER_ROLE_CHANGE', 'DASHBOARD_SETTING_UPDATE'). Atomic, not calculated.",
+              "nullable": false
+            },
+            {
+              "name": "entity_type",
+              "type": "string",
+              "description": "[Target entity type] - Entity or resource affected by the action. For example, 'virtual_account', 'deposit', 'notification_setting'. String, fully normalized.",
+              "nullable": false
+            },
+            {
+              "name": "target_entity_id",
+              "type": "uuid",
+              "description": "[Target entity id] - Optional, entity instance targeted. Nullable, so for global/settings actions, can be left null. Maintains 3NF.",
+              "nullable": true
+            },
+            {
+              "name": "result",
+              "type": "string",
+              "description": "[Action result] - Implements outcome tracking (e.g., 'SUCCESS', 'ERROR', errorMessage). Atomic string, not calculated or duplicated. For example, 'SUCCESS', or 'ERROR: INVALID_STATE'.",
+              "nullable": false
+            },
+            {
+              "name": "meta_json",
+              "type": "string",
+              "description": "[Meta/context data as JSON] - Stores additional atomic context/data about the action. Fully normalized—each log is a single action, no summary here.",
+              "nullable": false
+            },
+            {
+              "name": "ip_addr",
+              "type": "string",
+              "description": "[IP address] - The originating IP address for admin's session or action. Atomic value, helps detailed audits and risk tracking. For example, '203.0.113.123'.",
+              "nullable": false
+            },
+            {
+              "name": "occurred_at",
+              "type": "datetime",
+              "description": "[Timestamp when action occurred] - Implements event tracking for audit. Atomic and 3NF-compliant.",
+              "nullable": false
+            }
+          ],
+          "uniqueIndexes": [],
+          "plainIndexes": [
+            {
+              "fieldNames": [
+                "virtual_account_admin_id",
+                "occurred_at"
+              ]
+            }
+          ],
+          "ginIndexes": []
+        }
+      ]
+    },
+    {
+      "filename": "schema-06-utility_and_config.prisma",
+      "namespace": "UtilityAndConfig",
+      "models": [
+        {
+          "name": "virtual_account_system_settings",
+          "description": "[System Settings for Virtual Account Service] - This implements the global system setting management requirement from admin, security, and infra policies as described across sections 6, 7, and 8 of the requirements.\n\nHolds configuration for operation, security, integration behavior, feature toggles, notification throttling, export/default options, dashboard flags, and any non-secret system-level constants. Maintains 3NF compliance by separating single source system state/config from dynamic or user-scoped settings. For example, controlling whether specific external integrations are enabled, default expiration days, notification throttle intervals, system-wide toggles, feature rollout flags, etc.\n\nKey relationships: None (top-level singleton, referenced in code or material views only).\nSpecial behaviors: Only one record typically exists; changes must be strongly audited elsewhere.",
+          "material": false,
+          "primaryField": {
+            "name": "id",
+            "type": "uuid",
+            "description": "Primary Key. Unique identifier for a system settings row. Used for change traceability and internal referencing."
+          },
+          "foreignFields": [],
+          "plainFields": [
+            {
+              "name": "domain",
+              "type": "string",
+              "description": "[Settings domain key] - Implements requirement for modular config management.\n\nIdentifies which domain/config section this record applies to (e.g., infra, security, feature, notification). Allows atomic, self-describing grouping and normalization. For example, 'infra', 'erp', 'notification'.",
+              "nullable": false
+            },
+            {
+              "name": "setting_key",
+              "type": "string",
+              "description": "[Setting key] - Implements unique key requirement per domain/feature.\n\nAtomic setting key per section (ex: 'enable_erp_sync', 'default_expiry_days'). No duplication; enhances normalized update/lookup. For example, this is used for setting system-wide timeouts or feature flags.",
+              "nullable": false
+            },
+            {
+              "name": "setting_value",
+              "type": "string",
+              "description": "[Setting value] - Holds configuration value as string (atomic, normalized).\n\nFor example, true/false, number value as string, or JSON-encoded config block (if allowed by policy). Application layer can cast appropriately.",
+              "nullable": false
+            },
+            {
+              "name": "description",
+              "type": "string",
+              "description": "[Configuration description] - Implements admin/operator traceability.\n\nFree-form long description for admin interfaces. For example: 'ERP 연동기능 사용여부 ON/OFF, 0=OFF, 1=ON'.",
+              "nullable": false
+            },
+            {
+              "name": "created_at",
+              "type": "datetime",
+              "description": "[Record created timestamp] - Implements auditability requirement (section 7: logging).\n\nWhen this settings record was created. Used to ensure full change traceability. Never null.",
+              "nullable": false
+            },
+            {
+              "name": "updated_at",
+              "type": "datetime",
+              "description": "[Record update timestamp] - Implements auditability and data integrity.\n\nLatest change time. Tracked for change history. Never null.",
+              "nullable": false
+            }
+          ],
+          "uniqueIndexes": [
+            {
+              "fieldNames": [
+                "domain",
+                "setting_key"
+              ],
+              "unique": true
+            }
+          ],
+          "plainIndexes": [
+            {
+              "fieldNames": [
+                "domain"
+              ]
+            }
+          ],
+          "ginIndexes": [
+            {
+              "fieldName": "description"
+            }
+          ]
+        },
+        {
+          "name": "virtual_account_oauth_clients",
+          "description": "[OAuth2 Client Credential Registry] - This implements external ERP/Mall/Bank/PG API credential management requirements (see integration & security sections).\n\nStores credential identifiers, meta, and status for OAuth2-flavored clients which are used for all secure external API communications. Strict separation from secret keys/tokens (see HMAC keys). Maintains 3NF: No credentials or secrets stored here; only identifiers, usage status, and config. Example usage: ERP, PG, Bank connections that require client registration/admin revocation.\n\nKey relationships: None (used by code and system-level materialized views for integration).\nSpecial behaviors: Only non-secret meta values here; all secret material handled, encrypted, and stored elsewhere.",
+          "material": false,
+          "primaryField": {
+            "name": "id",
+            "type": "uuid",
+            "description": "Primary Key. Unique identifier for OAuth client registration."
+          },
+          "foreignFields": [],
+          "plainFields": [
+            {
+              "name": "client_id",
+              "type": "string",
+              "description": "[OAuth2 Client ID] - Implements unique integration credential mapping.\n\nOAuth2/OpenID client_id string; system unique per 3NF. Used to identify issued client apps (ERP, PG, Mall, etc). No secret material stored here.",
+              "nullable": false
+            },
+            {
+              "name": "integration_type",
+              "type": "string",
+              "description": "[Type of integration] - Implements requirement to support multiple external integration types.\n\nE.g., 'erp', 'pg', 'mall', 'bank'. Ensures strict normalization and ease of extension as new integration types are added.",
+              "nullable": false
+            },
+            {
+              "name": "provider_name",
+              "type": "string",
+              "description": "[Integration provider name] - Implements clear business mapping for integration credential.\n\nERP/PG/Mall/Bank vendor for this OAuth registration (e.g. 'duzon', 'toss', 'kg', 'cafe24'). Allows atomic, normalized query and management. Usage: listing, selection UI, provider filtering.",
+              "nullable": false
+            },
+            {
+              "name": "enabled",
+              "type": "boolean",
+              "description": "[Enable/disable status] - Implements system security and admin control needs.\n\nDisables keys for revoked/not-in-use/disabled clients. For example, a compromised or expired ERP integration will be marked disabled.",
+              "nullable": false
+            },
+            {
+              "name": "created_at",
+              "type": "datetime",
+              "description": "[Creation timestamp] - Audit/tracking requirement for security and change management.\n\nCreates temporal chain; never null. Used for audit reporting.",
+              "nullable": false
+            }
+          ],
+          "uniqueIndexes": [
+            {
+              "fieldNames": [
+                "client_id"
+              ],
+              "unique": true
+            }
+          ],
+          "plainIndexes": [
+            {
+              "fieldNames": [
+                "provider_name"
+              ]
+            },
+            {
+              "fieldNames": [
+                "integration_type"
+              ]
+            }
+          ],
+          "ginIndexes": []
+        },
+        {
+          "name": "virtual_account_hmac_keys",
+          "description": "[HMAC Secret/Key Registry] – Implements strong cryptographic secret management for ERP/Mall/Bank/PG API integration (security requirements, section 4/7).\n\nStores metadata and usage of issued HMAC keys (but never raw secrets in the database – only pointer/meta/status identifiers). Used to authorize external requests (inbound/outbound). Maintains strict normalization by separating secrets from meta/usage. For example: records which ERP/PG/mall/bank system and when last rotated/disabled. Example: Key for DUZON ERP API HMAC or Toss PG HMAC credential.\n\nKey relationships: None (not linked to other tables by FK to avoid key leakage through FK chaining).\nSpecial behaviors: Secret value is managed ONLY in process memory/vault (never in DB).",
+          "material": false,
+          "primaryField": {
+            "name": "id",
+            "type": "uuid",
+            "description": "Primary Key. Unique identifier for HMAC key row."
+          },
+          "foreignFields": [],
+          "plainFields": [
+            {
+              "name": "external_system",
+              "type": "string",
+              "description": "[Target system] - Implements secret granularity and audit mapping.\n\nERP/PG/Mall/Bank name using this HMAC key. Ensures system can filter/audit and rotate independently (e.g., DUZON, CAFE24, TOSS).",
+              "nullable": false
+            },
+            {
+              "name": "key_label",
+              "type": "string",
+              "description": "[HMAC key label] - Used for auditability and safe reference in logs/config.\n\nKey 'nickname' or label string (no secret). Prevents multiple usages/confusion of opaque key strings. Example: 'erp-main-live', 'pg-v2-sandbox'.",
+              "nullable": false
+            },
+            {
+              "name": "enabled",
+              "type": "boolean",
+              "description": "[Enable/disable status] - Implements security lifecycle management.\n\nFalse means this HMAC credential is revoked/disabled and NOT used by any integration processing. For example, old or expired API credential.",
+              "nullable": false
+            },
+            {
+              "name": "created_at",
+              "type": "datetime",
+              "description": "[Key creation timestamp] - Implements change logging.\n\nNever null. Used for key rotation reporting.",
+              "nullable": false
+            },
+            {
+              "name": "last_rotated_at",
+              "type": "datetime",
+              "description": "[Key last rotated timestamp] - Implements secret lifecycle policy compliance.\n\nTracks rotation lifecycle policy enforcement. Example: key must be rotated every 6 months by compliance, checked here. Never null.",
+              "nullable": false
+            },
+            {
+              "name": "expires_at",
+              "type": "datetime",
+              "description": "[Key expiration timestamp] - Implements key rotation and expiration policy requirements.\n\nFor policy requiring expiry of API keys after set period. Null if not time-limited.",
+              "nullable": true
+            }
+          ],
+          "uniqueIndexes": [
+            {
+              "fieldNames": [
+                "external_system",
+                "key_label"
+              ],
+              "unique": true
+            }
+          ],
+          "plainIndexes": [],
+          "ginIndexes": [
+            {
+              "fieldName": "key_label"
+            }
+          ]
+        },
+        {
+          "name": "virtual_account_materialized_stats",
+          "description": "[Materialized system stat/cached view] - Implements reporting/performance denormalization strictly limited to read-only dashboard/stat requirements (see admin dashboard section).\n\nCaches denormalized stats for fast dashboard render or heavy report generation – e.g., number of active virtual accounts, deposits this week, failed notifications. Only in mv_ table to fully comply with normalization and performance rules.\n\nKey relationships: None (often refreshed via ETL/batch job).\nSpecial behaviors: Read-only, never modified by application/ORM code. All denormalized fields must be calculated, not sourced directly from normalized business tables.",
+          "material": true,
+          "primaryField": {
+            "name": "id",
+            "type": "uuid",
+            "description": "Primary Key. Unique identifier for each stat snapshot row."
+          },
+          "foreignFields": [],
+          "plainFields": [
+            {
+              "name": "stat_key",
+              "type": "string",
+              "description": "[Stat key] - Key for the metric/aggregate captured (e.g., 'active_accounts', 'fail_deposit_count'). Denormalized, materialized only.",
+              "nullable": false
+            },
+            {
+              "name": "stat_value",
+              "type": "string",
+              "description": "[Stat value as string] - Implements quick dashboard number rendering, denormalized from business tables.\n\nAlways string for reporting flexibility, never used for calculation in this table.",
+              "nullable": false
+            },
+            {
+              "name": "as_of",
+              "type": "datetime",
+              "description": "[As of snapshot timestamp] - Implements audit trailing for dashboard stats, allows point-in-time reporting.",
+              "nullable": false
+            }
+          ],
+          "uniqueIndexes": [
+            {
+              "fieldNames": [
+                "stat_key",
+                "as_of"
+              ],
+              "unique": true
+            }
+          ],
+          "plainIndexes": [
+            {
+              "fieldNames": [
+                "as_of"
+              ]
+            }
+          ],
+          "ginIndexes": []
+        }
+      ]
+    }
+  ]
+}

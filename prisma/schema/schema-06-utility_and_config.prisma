@@ -1,0 +1,188 @@
+/// [System Settings for Virtual Account Service] - This implements the global system setting management requirement from admin, security, and infra policies as described across sections 6, 7, and 8 of the requirements.
+///
+/// Holds configuration for operation, security, integration behavior, feature toggles, notification throttling, export/default options, dashboard flags, and any non-secret system-level constants. Maintains 3NF compliance by separating single source system state/config from dynamic or user-scoped settings. For example, controlling whether specific external integrations are enabled, default expiration days, notification throttle intervals, system-wide toggles, feature rollout flags, etc.
+///
+/// Key relationships: None (top-level singleton, referenced in code or material views only).
+/// Special behaviors: Only one record typically exists; changes must be strongly audited elsewhere.
+///
+/// @namespace UtilityAndConfig
+/// @author AutoBE - https://github.com/wrtnlabs/autobe
+model virtual_account_system_settings {
+  //----
+  // COLUMNS
+  //----
+  /// Primary Key. Unique identifier for a system settings row. Used for change traceability and internal referencing.
+  id String @id @db.Uuid
+  
+  /// [Settings domain key] - Implements requirement for modular config management.
+  ///
+  /// Identifies which domain/config section this record applies to (e.g., infra, security, feature, notification). Allows atomic, self-describing grouping and normalization. For example, 'infra', 'erp', 'notification'.
+  domain String
+  
+  /// [Setting key] - Implements unique key requirement per domain/feature.
+  ///
+  /// Atomic setting key per section (ex: 'enable_erp_sync', 'default_expiry_days'). No duplication; enhances normalized update/lookup. For example, this is used for setting system-wide timeouts or feature flags.
+  setting_key String
+  
+  /// [Setting value] - Holds configuration value as string (atomic, normalized).
+  ///
+  /// For example, true/false, number value as string, or JSON-encoded config block (if allowed by policy). Application layer can cast appropriately.
+  setting_value String
+  
+  /// [Configuration description] - Implements admin/operator traceability.
+  ///
+  /// Free-form long description for admin interfaces. For example: 'ERP 연동기능 사용여부 ON/OFF, 0=OFF, 1=ON'.
+  description String
+  
+  /// [Record created timestamp] - Implements auditability requirement (section 7: logging).
+  ///
+  /// When this settings record was created. Used to ensure full change traceability. Never null.
+  created_at DateTime @db.Timestamptz
+  
+  /// [Record update timestamp] - Implements auditability and data integrity.
+  ///
+  /// Latest change time. Tracked for change history. Never null.
+  updated_at DateTime @db.Timestamptz
+  
+  //----
+  // RELATIONS
+  //----
+  @@unique([domain, setting_key])
+  @@index([domain])
+  @@index([description(ops: raw("gin_trgm_ops"))], type: Gin)
+}
+
+/// [OAuth2 Client Credential Registry] - This implements external ERP/Mall/Bank/PG API credential management requirements (see integration & security sections).
+///
+/// Stores credential identifiers, meta, and status for OAuth2-flavored clients which are used for all secure external API communications. Strict separation from secret keys/tokens (see HMAC keys). Maintains 3NF: No credentials or secrets stored here; only identifiers, usage status, and config. Example usage: ERP, PG, Bank connections that require client registration/admin revocation.
+///
+/// Key relationships: None (used by code and system-level materialized views for integration).
+/// Special behaviors: Only non-secret meta values here; all secret material handled, encrypted, and stored elsewhere.
+///
+/// @namespace UtilityAndConfig
+/// @author AutoBE - https://github.com/wrtnlabs/autobe
+model virtual_account_oauth_clients {
+  //----
+  // COLUMNS
+  //----
+  /// Primary Key. Unique identifier for OAuth client registration.
+  id String @id @db.Uuid
+  
+  /// [OAuth2 Client ID] - Implements unique integration credential mapping.
+  ///
+  /// OAuth2/OpenID client_id string; system unique per 3NF. Used to identify issued client apps (ERP, PG, Mall, etc). No secret material stored here.
+  client_id String
+  
+  /// [Type of integration] - Implements requirement to support multiple external integration types.
+  ///
+  /// E.g., 'erp', 'pg', 'mall', 'bank'. Ensures strict normalization and ease of extension as new integration types are added.
+  integration_type String
+  
+  /// [Integration provider name] - Implements clear business mapping for integration credential.
+  ///
+  /// ERP/PG/Mall/Bank vendor for this OAuth registration (e.g. 'duzon', 'toss', 'kg', 'cafe24'). Allows atomic, normalized query and management. Usage: listing, selection UI, provider filtering.
+  provider_name String
+  
+  /// [Enable/disable status] - Implements system security and admin control needs.
+  ///
+  /// Disables keys for revoked/not-in-use/disabled clients. For example, a compromised or expired ERP integration will be marked disabled.
+  enabled Boolean
+  
+  /// [Creation timestamp] - Audit/tracking requirement for security and change management.
+  ///
+  /// Creates temporal chain; never null. Used for audit reporting.
+  created_at DateTime @db.Timestamptz
+  
+  //----
+  // RELATIONS
+  //----
+  @@unique([client_id])
+  @@index([provider_name])
+  @@index([integration_type])
+}
+
+/// [HMAC Secret/Key Registry] – Implements strong cryptographic secret management for ERP/Mall/Bank/PG API integration (security requirements, section 4/7).
+///
+/// Stores metadata and usage of issued HMAC keys (but never raw secrets in the database – only pointer/meta/status identifiers). Used to authorize external requests (inbound/outbound). Maintains strict normalization by separating secrets from meta/usage. For example: records which ERP/PG/mall/bank system and when last rotated/disabled. Example: Key for DUZON ERP API HMAC or Toss PG HMAC credential.
+///
+/// Key relationships: None (not linked to other tables by FK to avoid key leakage through FK chaining).
+/// Special behaviors: Secret value is managed ONLY in process memory/vault (never in DB).
+///
+/// @namespace UtilityAndConfig
+/// @author AutoBE - https://github.com/wrtnlabs/autobe
+model virtual_account_hmac_keys {
+  //----
+  // COLUMNS
+  //----
+  /// Primary Key. Unique identifier for HMAC key row.
+  id String @id @db.Uuid
+  
+  /// [Target system] - Implements secret granularity and audit mapping.
+  ///
+  /// ERP/PG/Mall/Bank name using this HMAC key. Ensures system can filter/audit and rotate independently (e.g., DUZON, CAFE24, TOSS).
+  external_system String
+  
+  /// [HMAC key label] - Used for auditability and safe reference in logs/config.
+  ///
+  /// Key 'nickname' or label string (no secret). Prevents multiple usages/confusion of opaque key strings. Example: 'erp-main-live', 'pg-v2-sandbox'.
+  key_label String
+  
+  /// [Enable/disable status] - Implements security lifecycle management.
+  ///
+  /// False means this HMAC credential is revoked/disabled and NOT used by any integration processing. For example, old or expired API credential.
+  enabled Boolean
+  
+  /// [Key creation timestamp] - Implements change logging.
+  ///
+  /// Never null. Used for key rotation reporting.
+  created_at DateTime @db.Timestamptz
+  
+  /// [Key last rotated timestamp] - Implements secret lifecycle policy compliance.
+  ///
+  /// Tracks rotation lifecycle policy enforcement. Example: key must be rotated every 6 months by compliance, checked here. Never null.
+  last_rotated_at DateTime @db.Timestamptz
+  
+  /// [Key expiration timestamp] - Implements key rotation and expiration policy requirements.
+  ///
+  /// For policy requiring expiry of API keys after set period. Null if not time-limited.
+  expires_at DateTime? @db.Timestamptz
+  
+  //----
+  // RELATIONS
+  //----
+  @@unique([external_system, key_label])
+  @@index([key_label(ops: raw("gin_trgm_ops"))], type: Gin)
+}
+
+/// [Materialized system stat/cached view] - Implements reporting/performance denormalization strictly limited to read-only dashboard/stat requirements (see admin dashboard section).
+///
+/// Caches denormalized stats for fast dashboard render or heavy report generation – e.g., number of active virtual accounts, deposits this week, failed notifications. Only in mv_ table to fully comply with normalization and performance rules.
+///
+/// Key relationships: None (often refreshed via ETL/batch job).
+/// Special behaviors: Read-only, never modified by application/ORM code. All denormalized fields must be calculated, not sourced directly from normalized business tables.
+///
+/// @author AutoBE - https://github.com/wrtnlabs/autobe
+model virtual_account_materialized_stats {
+  //----
+  // COLUMNS
+  //----
+  /// Primary Key. Unique identifier for each stat snapshot row.
+  id String @id @db.Uuid
+  
+  /// [Stat key] - Key for the metric/aggregate captured (e.g., 'active_accounts', 'fail_deposit_count'). Denormalized, materialized only.
+  stat_key String
+  
+  /// [Stat value as string] - Implements quick dashboard number rendering, denormalized from business tables.
+  ///
+  /// Always string for reporting flexibility, never used for calculation in this table.
+  stat_value String
+  
+  /// [As of snapshot timestamp] - Implements audit trailing for dashboard stats, allows point-in-time reporting.
+  as_of DateTime @db.Timestamptz
+  
+  //----
+  // RELATIONS
+  //----
+  @@unique([stat_key, as_of])
+  @@index([as_of])
+}

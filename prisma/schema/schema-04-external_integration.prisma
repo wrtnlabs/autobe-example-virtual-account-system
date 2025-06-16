@@ -1,0 +1,187 @@
+/// External Systems Registry - This model implements the requirement to support dynamic integration with external platforms (ERP, Mall, Bank/PG) from requirement sections 4.2/4.3/8. Each record represents a unique external system with configuration. Maintains 3NF as all attributes depend solely on the primary key. Example: Cafe24 Mall, DOUZONE ERP, KG Inicis. Key relationships: referenced by sync and log tables. Special behaviors: Ensures integrations are managed and identifiable.
+///
+/// @namespace ExternalIntegration
+/// @author AutoBE - https://github.com/wrtnlabs/autobe
+model virtual_account_external_systems {
+  //----
+  // COLUMNS
+  //----
+  /// Primary Key.
+  id String @id @db.Uuid
+  
+  /// Type of external system (e.g., 'ERP', 'MALL', 'BANK', 'PG'). Implements requirement for multi-type integration. Ensures normalization by atomic string, no redundant arrays. Example: 'ERP'.
+  system_type String
+  
+  /// Display name of the system. Used for screens, logs, and configuration. Maintains normalization; no derived values. Example: 'Cafe24', 'DOUZONE iCUBE'.
+  name String
+  
+  /// Base URL of external API endpoint. Implements connectivity requirement. Ensures normalization by not caching responses. Example: 'https://erp.example.com/api/'.
+  api_base_url String @db.VarChar(80000)
+  
+  /// If this integration is enabled. Used for admin toggle on/off. 1NF: atomic flag. Example: true.
+  enabled Boolean
+  
+  /// Record creation timestamp. For auditing and requirement traceability. Example: '2025-06-16T08:10:56.739Z'.
+  created_at DateTime @db.Timestamptz
+  
+  /// Last update timestamp. Used for sync and admin page. 3NF: Direct property of record. Example: '2025-06-16T08:10:56.739Z'.
+  updated_at DateTime @db.Timestamptz
+  
+  //----
+  // RELATIONS
+  //----
+  virtual_account_external_integration_logs virtual_account_external_integration_logs[]
+  virtual_account_erp_syncs virtual_account_erp_syncs[]
+  virtual_account_mall_syncs virtual_account_mall_syncs[]
+  
+  @@unique([system_type, name])
+}
+
+/// External Integration Event Logs - Implements audit and traceability of all data exchanges with external systems (see requirements 4.3/5/8). Example: every API call result, sync fail, or push event. Maintains 3NF—no aggregation, each log depends on a single integration event. Usage: admin troubleshooting, compliance evidence. Key relationship: references external system. Special behaviors: Immutable logs.
+///
+/// @namespace ExternalIntegration
+/// @author AutoBE - https://github.com/wrtnlabs/autobe
+model virtual_account_external_integration_logs {
+  //----
+  // COLUMNS
+  //----
+  /// Primary Key.
+  id String @id @db.Uuid
+  
+  /// External system's {@link virtual_account_external_systems.id}. Fulfills requirement for system-level traceability. Enforces referential integrity; no orphan logs.
+  external_system_id String @db.Uuid
+  
+  /// Integration event type (e.g., 'SYNC', 'PUSH', 'FAIL'). Provides normalization by using controlled vocabularies for log analytics. Example: 'SYNC'.
+  event_type String
+  
+  /// Raw request sent to the external system. For full trace/audit compliance. Maintains atomicity. Example: JSON body.
+  request_payload String
+  
+  /// Raw response received. For after-the-fact troubleshooting or compliance. Not pre-parsed/processed.
+  response_payload String?
+  
+  /// Indicates if the event was successful. Used for admin alert logic and retry rules. Atomic boolean, normalized. Example: false.
+  success Boolean
+  
+  /// Error description if failed. Null if success=true. 3NF: property of the event. Example: 'Timeout'.
+  error_message String?
+  
+  /// Time of event log creation. Used for admin ordering and analytics. Example: '2025-06-16T08:10:56.739Z'.
+  created_at DateTime @db.Timestamptz
+  
+  //----
+  // RELATIONS
+  //----
+  external_system virtual_account_external_systems @relation(fields: [external_system_id], references: [id], onDelete: Cascade)
+  
+  @@index([external_system_id, created_at])
+}
+
+/// ERP Type Dictionary - Implements requirement from external integration (section 4.2) to support multiple ERP platforms. Each record is a supported ERP vendor/type. Maintains normalization; no redundant codes. Used in foreign keys from erp sync log. Example: DOUZONE, SAP. Key: referenced by erp sync records.
+///
+/// @namespace ExternalIntegration
+/// @author AutoBE - https://github.com/wrtnlabs/autobe
+model virtual_account_erp_types {
+  //----
+  // COLUMNS
+  //----
+  /// Primary Key.
+  id String @id @db.Uuid
+  
+  /// Unique short code for ERP type. Example: 'DOUZON', 'SAP'. Used for validation; 3NF compliance; enforces acceptance of new ERP partners.
+  code String
+  
+  /// Human-readable name. Used on UX and logs. Example: '더존 iCUBE'.
+  display_name String
+  
+  /// Record creation time. Example: '2025-06-16T08:10:56.739Z'.
+  created_at DateTime @db.Timestamptz
+  
+  //----
+  // RELATIONS
+  //----
+  virtual_account_erp_syncs virtual_account_erp_syncs[]
+  
+  @@unique([code])
+  @@index([display_name(ops: raw("gin_trgm_ops"))], type: Gin)
+}
+
+/// ERP Sync Outbound Log - Implements data transfer history from requirement 4.4/4.5. Each row is a transmission log to an ERP system. Example: 'order_id=1', 'status=COMPLETE', 'DUZON'. Maintains 3NF by storing record per outbound payload. Usage: troubleshooting, compliance, and ER integration. Relationships: references an ERP type and an external system.
+///
+/// @namespace ExternalIntegration
+/// @author AutoBE - https://github.com/wrtnlabs/autobe
+model virtual_account_erp_syncs {
+  //----
+  // COLUMNS
+  //----
+  /// Primary Key.
+  id String @id @db.Uuid
+  
+  /// ERP Type's {@link virtual_account_erp_types.id}. Implements support for multiple ERP. Enforces referential integrity.
+  erp_type_id String @db.Uuid
+  
+  /// External system this sync targets. Enforces system-level sync mapping. References {@link virtual_account_external_systems.id}.
+  external_system_id String @db.Uuid
+  
+  /// Raw outbound data payload, atomic per sync. Maintains normalization. Example: JSON payload sent to ERP.
+  payload String
+  
+  /// Result of this outbound operation, e.g. 'SUCCESS', 'FAIL'. Enables admin filtering. Not computed.
+  result_status String
+  
+  /// Populated on failure only. Null if status=SUCCESS. For support. Maintains 3NF.
+  error_message String?
+  
+  /// Time of sync event. 3NF property. Example: '2025-06-16T08:10:56.739Z'.
+  created_at DateTime @db.Timestamptz
+  
+  //----
+  // RELATIONS
+  //----
+  erp_type virtual_account_erp_types @relation(fields: [erp_type_id], references: [id], onDelete: Cascade)
+  external_system virtual_account_external_systems @relation(fields: [external_system_id], references: [id], onDelete: Cascade)
+  
+  @@index([erp_type_id, created_at])
+  @@index([external_system_id, created_at])
+}
+
+/// Mall Sync Outbound Log - This implements the requirement to track all outbound webhooks/API pushes to mall systems (Cafe24, 고도몰 등), see requirement 4.4. Each row is one transmission event. Maintains 3NF. Supports troubleshooting in admin dashboard. Key relationships: references external system only.
+///
+/// @namespace ExternalIntegration
+/// @author AutoBE - https://github.com/wrtnlabs/autobe
+model virtual_account_mall_syncs {
+  //----
+  // COLUMNS
+  //----
+  /// Primary Key.
+  id String @id @db.Uuid
+  
+  /// Mall system reference {@link virtual_account_external_systems.id}. Maintains referential integrity for outbound mall pushes.
+  external_system_id String @db.Uuid
+  
+  /// Order ID sent to mall; atomic string. Example: 'ORD20240601-18'. Fulfills order mapping requirement. Not derived.
+  order_id String
+  
+  /// Raw outbound payload sent to external system. Maintains normalization.
+  payload String
+  
+  /// Response from external system. Not preprocessed, stored atomic per sync event for audit.
+  response String?
+  
+  /// Result: 'SUCCESS', 'FAIL', etc. Enables filtering in dashboard. Maintains 3NF.
+  result_status String
+  
+  /// Error message if failure only. Null if status is 'SUCCESS'.
+  error_message String?
+  
+  /// Time of sync. Key field for temporal queries.
+  created_at DateTime @db.Timestamptz
+  
+  //----
+  // RELATIONS
+  //----
+  external_system virtual_account_external_systems @relation(fields: [external_system_id], references: [id], onDelete: Cascade)
+  
+  @@index([external_system_id, order_id])
+  @@index([created_at])
+}

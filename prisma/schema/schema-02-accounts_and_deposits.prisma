@@ -1,0 +1,320 @@
+/// [Bank Master Table] - This implements the requirement from the external integration and account issuance documentation for managing supported banks for virtual accounts. 
+///
+/// This model records all banks that can provide virtual accounts through API integration. Maintains 3NF by storing only atomic banking details with no duplication. For example, used when listing banks for new virtual account issuance, and during bank code mapping for deposits. 
+///
+/// Key relationships: referenced by virtual accounts for provider identification.
+/// Special behaviors: Banks are referenced as foreign keys; cannot be deleted if linked to an account.
+///
+/// @namespace AccountsAndDeposits
+/// @author AutoBE - https://github.com/wrtnlabs/autobe
+model virtual_account_banks {
+  //----
+  // COLUMNS
+  //----
+  /// Primary Key. Unique identifier for bank master record.
+  id String @id @db.Uuid
+  
+  /// [Bank Name] - Implements bank descriptive naming requirement. Stores the display name shown to users and admins; required for clear account identification. Ensures 3NF; no calculated values. Example: 'KEB 하나은행'
+  name String
+  
+  /// [Bank Code] - Required for external integration with PG/bank API and unique mapping. Stores standard banking code; must be unique. Example: '004' for KB.
+  code String
+  
+  /// [Bank logo URI] - Implements branding requirement. Stores image/logo URI for UI/UX display. Remains atomic and non-redundant; example: used on virtual account selector.
+  logo_url String? @db.VarChar(80000)
+  
+  /// [Created Timestamp] - Implements audit trail and reporting requirement. Records when the bank entry was added. Never null. Example: new provider onboarding date.
+  created_at DateTime @db.Timestamptz
+  
+  /// [Updated Timestamp] - For record modification audit. Non-nullable to ensure full audit.
+  updated_at DateTime @db.Timestamptz
+  
+  //----
+  // RELATIONS
+  //----
+  virtual_account_virtual_accounts virtual_account_virtual_accounts[]
+  
+  @@unique([code])
+  @@index([name])
+}
+
+/// [PG Provider Master Table] - Implements requirement for managing all virtual account-enabled payment gateways (PGs) in the system, e.g., KG이니시스, Toss Payments. 
+///
+/// Purpose: Track supported PG providers available for account issuance and deposit APIs. Maintains 3NF by only storing atomic and provider-specific info. Used for: PG provider selection during account issuance and reporting. Relations: Referenced by virtual_account_virtual_accounts table. 
+///
+/// Special behaviors: Cannot be deleted if virtual accounts reference this row.
+///
+/// @namespace AccountsAndDeposits
+/// @author AutoBE - https://github.com/wrtnlabs/autobe
+model virtual_account_pg_providers {
+  //----
+  // COLUMNS
+  //----
+  /// Primary Key. Unique identifier for the PG provider.
+  id String @id @db.Uuid
+  
+  /// [Provider Name] - Implements requirement for descriptive naming; e.g., 'KG이니시스'. Used for selection and listings. 3NF; never calculated.
+  name String
+  
+  /// [Provider Code] - Implements API reference requirement. Used as code on API calls; e.g., 'KG', 'TOSS'. Must be unique.
+  code String
+  
+  /// [API Endpoint URI] - Implements provider API connection config. Stores external endpoint for integration; 3NF-compliant. For example: used in account issuance polling.
+  api_endpoint String @db.VarChar(80000)
+  
+  /// [Created Timestamp] - Tracks when provider was onboarded; for audits. Example: contract/registration date.
+  created_at DateTime @db.Timestamptz
+  
+  /// [Updated Timestamp] - Tracks last update to provider info. Required for system health checks.
+  updated_at DateTime @db.Timestamptz
+  
+  //----
+  // RELATIONS
+  //----
+  virtual_account_virtual_accounts virtual_account_virtual_accounts[]
+  
+  @@unique([code])
+  @@index([name])
+}
+
+/// [Virtual Account Base Table] - Implements requirement for tracking all virtual accounts issued by the system per customer, per bank, and per PG. Maintains 3NF by storing only atomic account attributes. Example: used when querying account list, matching incoming deposit, auditing issuance records.
+///
+/// Key relationships: references customers, banks, PG providers; referenced by status logs, deposits.
+/// Special behaviors: Expired/finished accounts soft-marked, never physically deleted.
+///
+/// @namespace AccountsAndDeposits
+/// @author AutoBE - https://github.com/wrtnlabs/autobe
+model virtual_account_virtual_accounts {
+  //----
+  // COLUMNS
+  //----
+  /// Primary Key. Unique ID for each issued virtual account.
+  id String @id @db.Uuid
+  
+  /// References the customer who owns the virtual account; target: virtual_account_customers.id. Fulfills customer-account connection requirement for issuance/matching/audit.
+  customer_id String @db.Uuid
+  
+  /// References external bank; target: virtual_account_banks.id. Required for mapping account to bank for integration/API.
+  bank_id String @db.Uuid
+  
+  /// References PG provider; target: virtual_account_pg_providers.id. Ensures every account is linked to origin PG for webhook/API updates.
+  pg_provider_id String @db.Uuid
+  
+  /// [Account Number] - Implements virtual account number issuance, matches external format. 3NF, always unique in combination with bank/PG.
+  account_number String
+  
+  /// [Valid Until] - Records expiry date/time for virtual account. Used for invalidation/cleanup/alerts. Not calculated, atomic datetime only.
+  expire_at DateTime @db.Timestamptz
+  
+  /// [Account Status] - Implements lifecycle state such as 'ACTIVE', 'EXPIRED', 'CLOSED'. Required for dashboard/status change. 3NF; single value only.
+  status String
+  
+  /// [Account Holder Name] - Stores name displayed as account owner. Used for recipient matching. Never calculated, non-null.
+  holder_name String
+  
+  /// [Issued Timestamp] - Audit info of when the account was created/issued.
+  created_at DateTime @db.Timestamptz
+  
+  /// [Last Modified Timestamp] - Audit info for status or info edits. Not null.
+  updated_at DateTime @db.Timestamptz
+  
+  /// [Closed Timestamp] - Set when account is expired/finished. Used for stats and reporting. Null when account is open.
+  closed_at DateTime? @db.Timestamptz
+  
+  //----
+  // RELATIONS
+  //----
+  customer virtual_account_customers @relation(fields: [customer_id], references: [id], onDelete: Cascade)
+  bank virtual_account_banks @relation(fields: [bank_id], references: [id], onDelete: Cascade)
+  pg_provider virtual_account_pg_providers @relation(fields: [pg_provider_id], references: [id], onDelete: Cascade)
+  
+  virtual_account_account_status_logs virtual_account_account_status_logs[]
+  virtual_account_deposits virtual_account_deposits[]
+  
+  @@index([bank_id])
+  @@index([pg_provider_id])
+  
+  @@unique([account_number, bank_id, pg_provider_id])
+  @@index([customer_id])
+  @@index([expire_at])
+}
+
+/// [Account Status Change Log] - Implements audit and regulatory requirement for recording every status transition (e.g., activate, expire, close) on a virtual account. 
+///
+/// 3NF is guaranteed by normalizing log per event; never includes calculated/summary fields. Used when tracking account lifecycle changes for auditing/system tracing.
+///
+/// Key relationships: references virtual_account_virtual_accounts and admin (actor).
+///
+/// @namespace AccountsAndDeposits
+/// @author AutoBE - https://github.com/wrtnlabs/autobe
+model virtual_account_account_status_logs {
+  //----
+  // COLUMNS
+  //----
+  /// Primary Key. Unique key for status log.
+  id String @id @db.Uuid
+  
+  /// References the virtual account; implements per-account audit logging. Target: virtual_account_virtual_accounts.id.
+  virtual_account_id String @db.Uuid
+  
+  /// References the admin who performed the status change. Implements actor audit. Target: virtual_account_admins.id.
+  admin_id String @db.Uuid
+  
+  /// [Old Status] - Records pre-change status. E.g., 'ACTIVE'. Ensures all transitions are atomic records only, fully normalized.
+  from_status String
+  
+  /// [New Status] - New status after change. Used in transition tracking. Example: 'EXPIRED'.
+  to_status String
+  
+  /// [Change Reason] - Implements requirement to provide reason for change (free text). Atomic string; example: 'expired by bank'.
+  reason String
+  
+  /// [Status Changed Timestamp] - Exact time status changed. No calculated field. Required for sequential status history.
+  changed_at DateTime @db.Timestamptz
+  
+  //----
+  // RELATIONS
+  //----
+  virtual_account virtual_account_virtual_accounts @relation(fields: [virtual_account_id], references: [id], onDelete: Cascade)
+  admin virtual_account_admins @relation(fields: [admin_id], references: [id], onDelete: Cascade)
+  
+  @@index([admin_id])
+  
+  @@index([virtual_account_id, changed_at])
+}
+
+/// [Deposit Event Table] - Implements requirement for logging every incoming deposit to any virtual account; never stores summaries, only atomic events. 3NF compliance is met by logging one row per real deposit event, no aggregation.
+///
+/// Business context: Core of auto-matching, alarm, ERP integration. Example: every webhook from PG/bank creates a row here.
+///
+/// Key relationships: References virtual_account_virtual_accounts, used in matching, error, notification modules.
+///
+/// @namespace AccountsAndDeposits
+/// @author AutoBE - https://github.com/wrtnlabs/autobe
+model virtual_account_deposits {
+  //----
+  // COLUMNS
+  //----
+  /// Primary Key. Unique row for deposit event.
+  id String @id @db.Uuid
+  
+  /// References the virtual account related to this deposit. Used for matching and statistics. Target: virtual_account_virtual_accounts.id.
+  virtual_account_id String @db.Uuid
+  
+  /// [Deposit Amount] - Atomic value of money incoming. Must be exact match for auto-matching. Example: 124000.50
+  amount Float @db.DoublePrecision
+  
+  /// [Depositor Name] - Captures sender for matching/audit. 3NF, only string, never summary.
+  depositor_name String
+  
+  /// [Deposited Timestamp] - Real deposit event time (from webhook/data).
+  deposited_at DateTime @db.Timestamptz
+  
+  /// [Bank Reference No.] - External reference sent from bank/PG for duplicate detection; atomic string.
+  reference_no String
+  
+  /// [Processing Status] - 'PENDING', 'MATCHED', 'ERROR'. Required for dashboard and alarm. 3NF strictly enforced.
+  status String
+  
+  /// [Created Timestamp] - When the record is entered; supports late/delayed events.
+  created_at DateTime @db.Timestamptz
+  
+  //----
+  // RELATIONS
+  //----
+  virtual_account virtual_account_virtual_accounts @relation(fields: [virtual_account_id], references: [id], onDelete: Cascade)
+  
+  virtual_account_deposit_matchings virtual_account_deposit_matchings[]
+  virtual_account_deposit_errors virtual_account_deposit_errors[]
+  
+  @@unique([reference_no, virtual_account_id])
+  @@index([virtual_account_id, deposited_at])
+}
+
+/// [Deposit Matching Log Table] - Implements requirement for tracking all attempts to auto-match or manually match deposit events to customers/orders. Fully normalized; one row per actual matching event, with before/after, never summary.
+///
+/// Used in: audit trails, error diagnosis, reprocessing. Never stores aggregation or computed counts. 
+///
+/// Key relationships: references deposit and admin (actor).
+///
+/// @namespace AccountsAndDeposits
+/// @author AutoBE - https://github.com/wrtnlabs/autobe
+model virtual_account_deposit_matchings {
+  //----
+  // COLUMNS
+  //----
+  /// Primary Key. Unique row for every matching attempt.
+  id String @id @db.Uuid
+  
+  /// References deposit to be matched. Required for traceability. Target: virtual_account_deposits.id.
+  deposit_id String @db.Uuid
+  
+  /// References admin who performed the matching (auto/manual); required for audit trail. Target: virtual_account_admins.id.
+  admin_id String @db.Uuid
+  
+  /// [Matched Customer ID] - Atomic UUID to track which customer got assigned via matching. Normalized (not derived from join/calc).
+  matched_customer_id String @db.Uuid
+  
+  /// [Matched Timestamp] - When the matching occurred; always actual event time. 3NF; nulls not allowed. Example: '2025-06-16T11:05:00+09:00'
+  matched_at DateTime @db.Timestamptz
+  
+  /// [Matching Method] - 'AUTOMATIC' or 'MANUAL'. String lookup; not computed. For audit and dashboard logic.
+  matching_method String
+  
+  /// [Matching Reason] - Administrator/auto-comment for audit, if available. Not null (empty if no reason).
+  reason String
+  
+  //----
+  // RELATIONS
+  //----
+  deposit virtual_account_deposits @relation(fields: [deposit_id], references: [id], onDelete: Cascade)
+  admin virtual_account_admins @relation(fields: [admin_id], references: [id], onDelete: Cascade)
+  
+  @@index([admin_id])
+  
+  @@index([deposit_id, matched_at])
+}
+
+/// [Deposit Error Log] - Implements strict audit and error handling requirement for deposits that failed matching or processing. Fully normalized; no denormalized fields.
+///
+/// Business use: Error diagnosis workflow for admin dashboard, alarm triggers, reprocessing scanner jobs. No summary/aggregate. 
+///
+/// Key relationships: references deposit and admin (actor).
+///
+/// @namespace AccountsAndDeposits
+/// @author AutoBE - https://github.com/wrtnlabs/autobe
+model virtual_account_deposit_errors {
+  //----
+  // COLUMNS
+  //----
+  /// Primary Key. Unique key for deposit error record.
+  id String @id @db.Uuid
+  
+  /// References failed deposit event. Used for error diagnosis and alarm reporting. Target: virtual_account_deposits.id.
+  deposit_id String @db.Uuid
+  
+  /// References admin actor who classified or handled the error. Target: virtual_account_admins.id.
+  admin_id String? @db.Uuid
+  
+  /// [Error Code] - Business or system error code that classifies the cause; e.g., 'AMOUNT_NOT_MATCH', 'ACCOUNT_EXPIRED'. Never aggregation.
+  error_code String
+  
+  /// [Error Message] - Free text describing error. Required for audit. 3NF.
+  error_message String
+  
+  /// [Error Detail] - Any developer system detail (raw JSON/text). Null allowed. Not derived/calc.
+  error_detail String?
+  
+  /// [Occurred Timestamp] - Point-in-time for error for strict sequencing. Not null.
+  occurred_at DateTime @db.Timestamptz
+  
+  //----
+  // RELATIONS
+  //----
+  deposit virtual_account_deposits @relation(fields: [deposit_id], references: [id], onDelete: Cascade)
+  admin virtual_account_admins? @relation(fields: [admin_id], references: [id], onDelete: Cascade)
+  
+  @@index([admin_id])
+  
+  @@index([deposit_id, occurred_at])
+}

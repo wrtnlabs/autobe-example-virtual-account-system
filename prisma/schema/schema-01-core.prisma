@@ -1,0 +1,210 @@
+/// Customer information for virtual account issuance and deposit tracking - Implements the customer registration and KYC requirements from the requirements report (see '고객 등록', '주요 사용자 및 역할').
+///
+/// Customers are the primary end-users of the virtual account system. This model holds personal and contact details (name, phone/email), registration data, and references for subsequent account/transaction linkage. Maintains strict 3NF normalization with separate linking to roles and activity logs. For example, it's used whenever a new service registration or account issuance is initiated. 
+///
+/// Key relationships: to issued virtual accounts, deposits, notifications, and activity logs. Special behaviors: ensures unique identification and secure, normalized personal data storage.
+///
+/// @namespace Core
+/// @author AutoBE - https://github.com/wrtnlabs/autobe
+model virtual_account_customers {
+  //----
+  // COLUMNS
+  //----
+  /// Primary Key. Unique identifier for a customer.
+  id String @id @db.Uuid
+  
+  /// Customer's full name - Implements the basic KYC registration requirement. Stores the person name atomically for identification. Example: '홍길동'. Must be present for every customer.
+  name String
+  
+  /// Customer's primary phone number - Implements contact verification requirement. Example: '010-1234-5678'. Normalized as a single value.
+  phone String
+  
+  /// Customer's main email address - Implements contact/alarm requirements. Used for notifications, password reset, and 2FA. Example: 'hong@test.com'.
+  email String
+  
+  /// Date/time of customer registration - Implements audit/tracing of service initiation requirement. Example: '2025-04-01T15:23:00+09:00'. 3NF: does not pre-calculate any durations.
+  registered_at DateTime @db.Timestamptz
+  
+  /// Soft deletion timestamp - Implements retention and deletion compliance requirements. Null unless account is deleted. 3NF compliance, nullable field.
+  deleted_at DateTime? @db.Timestamptz
+  
+  //----
+  // RELATIONS
+  //----
+  virtual_account_virtual_accounts virtual_account_virtual_accounts[]
+  
+  @@unique([phone])
+  @@unique([email])
+  @@index([registered_at])
+  @@index([name(ops: raw("gin_trgm_ops"))], type: Gin)
+}
+
+/// Administrator user information for virtual account management system. Implements requirements for role-based secure admin management from administrator/슈퍼관리자 roles in requirements analysis.
+///
+/// Admin accounts have audit/admin privileges over customer, account, deposit and notification activities. Maintains strict 3NF and links to role/permission management. For example, whenever a dashboard login occurs, or account status is updated, this model is referenced.
+///
+/// Key relationships: roles, activity logs, 2FA records. Special behaviors: login, password reset, admin lockout policies enforced.
+///
+/// @namespace Core
+/// @author AutoBE - https://github.com/wrtnlabs/autobe
+model virtual_account_admins {
+  //----
+  // COLUMNS
+  //----
+  /// Primary Key. Unique identifier for an admin user.
+  id String @id @db.Uuid
+  
+  /// Administrator login name - Implements secure admin/authentication requirements. Must be unique, 3NF: atomic login ID.
+  username String
+  
+  /// Hashed password for admin authentication - Implements PW/2FA compliance. Never stores plain password. 3NF compliant; hash only.
+  password_hash String
+  
+  /// Admin email for alerts and reset - Implements notification and security policies. Used for e.g. 2FA, system alerts. Must be unique for admins.
+  email String
+  
+  /// Admin account creation timestamp - For audit trail and security reporting. Example: '2025-06-01T13:00:00+09:00'. 3NF, not calculated. Used in logins and account audits.
+  created_at DateTime @db.Timestamptz
+  
+  /// Last login time for the admin user. Implements compliance and monitoring requirements. Null if never logged in. 3NF (never pre-computes durations).
+  last_login_at DateTime? @db.Timestamptz
+  
+  /// Account lockout timestamp. Implements login security, lockout after failed logins, etc. Null if not locked. 3NF compliant.
+  locked_until DateTime? @db.Timestamptz
+  
+  //----
+  // RELATIONS
+  //----
+  virtual_account_account_status_logs virtual_account_account_status_logs[]
+  virtual_account_deposit_matchings virtual_account_deposit_matchings[]
+  virtual_account_deposit_errors virtual_account_deposit_errors[]
+  virtual_account_dashboard_settings virtual_account_dashboard_settings?
+  virtual_account_excel_exports virtual_account_excel_exports[]
+  virtual_account_admin_alerts virtual_account_admin_alerts[]
+  virtual_account_admin_activity_logs virtual_account_admin_activity_logs[]
+  
+  @@unique([username])
+  @@unique([email])
+  @@index([created_at])
+}
+
+/// Super admin (root) account list - Implements the optional 'super administrator' role for total platform policy management (See requirements section '슈퍼관리자(선택적)').
+///
+/// Has the highest privileges: managing admin roles, audit policies, system settings. Strictly normalized and isolated for extra security. Used for system-level actions and on-boarding new admins. Referenced when privilege delegation, emergency actions, policy changes are logged.
+///
+/// Key relationships: to admin/role audit logs. Special behavior: extreme restrictions, single or minimal rows expected.
+///
+/// @namespace Core
+/// @author AutoBE - https://github.com/wrtnlabs/autobe
+model virtual_account_super_admins {
+  //----
+  // COLUMNS
+  //----
+  /// Primary Key. Unique identifier for the super admin.
+  id String @id @db.Uuid
+  
+  /// Super admin login name - Implements root-level authentication. Unique value. 3NF: atomic per super admin.
+  username String
+  
+  /// Password hash for super admin login - Never stores plain text password, for compliance. 3NF, hash only.
+  password_hash String
+  
+  /// Super admin account creation timestamp. For audit/logging only. 3NF only (no derived values).
+  created_at DateTime @db.Timestamptz
+  
+  //----
+  // RELATIONS
+  //----
+  @@unique([username])
+  @@index([created_at])
+}
+
+/// Role types for RBAC - Implements the role/permission separation requirement across admins/super admins outlined in the requirements (see '권한 및 역할 관리').
+///
+/// Defines roles such as ordinary admin, super admin, audit viewer, etc. Normalized, with join-table to permissions. Used whenever access is checked for any admin action or UI section. 
+///
+/// Key relationships: to admins, role-permission links. Special behaviors: strictly assigned to users, not containing calculated or redundant fields.
+///
+/// @namespace Core
+/// @author AutoBE - https://github.com/wrtnlabs/autobe
+model virtual_account_roles {
+  //----
+  // COLUMNS
+  //----
+  /// Primary Key. Unique role identifier.
+  id String @id @db.Uuid
+  
+  /// Role name (e.g. ADMIN, SUPER_ADMIN, AUDITOR) - Implements the requirement for explicit named roles per RBAC. Unique/atomic. Example: 'ADMIN'.
+  name String
+  
+  /// Role description - Explains scope/limitations of the role as required for audit and onboarding. Does not duplicate other info; 3NF compliant.
+  description String
+  
+  //----
+  // RELATIONS
+  //----
+  virtual_account_role_permissions virtual_account_role_permissions[]
+  
+  @@unique([name])
+}
+
+/// Permission (action/capability) definitions for RBAC - Implements the fine-grained action/permission requirement outlined in '권한 및 역할 관리'.
+///
+/// Normalizes all possible platform permissions (e.g. VIEW_DASHBOARD, MANAGE_CUSTOMERS, EXPORT_EXCEL) for assignment to roles. Used in evaluating/assigning privilege for every admin action.
+///
+/// Key relationships: to roles via role-permission join table. Special: maintained as a unique normalized catalog of permissions. Usage: permission assignment, audit, onboarding.
+///
+/// @namespace Core
+/// @author AutoBE - https://github.com/wrtnlabs/autobe
+model virtual_account_permissions {
+  //----
+  // COLUMNS
+  //----
+  /// Primary Key. Unique permission identifier.
+  id String @id @db.Uuid
+  
+  /// Permission code (e.g. VIEW_DASHBOARD) - Implements explicit permission control per RBAC/requirement. Must be unique. Example: 'VIEW_DASHBOARD'.
+  code String
+  
+  /// Permission description - Explains business use and scope. Example: '권한 없는 화면 접근시 오류 발생'. 3NF compliant documentation.
+  description String
+  
+  //----
+  // RELATIONS
+  //----
+  virtual_account_role_permissions virtual_account_role_permissions[]
+  
+  @@unique([code])
+}
+
+/// Join table for role-permission (M:N) mapping - Implements normalized M:N assignment from RBAC rules ('권한 및 역할 관리' section of requirements).
+///
+/// Ensures 3NF/bridge table between roles and permissions: For example, allows 'ADMIN' role to be mapped to multiple permissions, and same permission assigned to multiple roles. Used when admins are checked for permissions, or permission assignment screens/audit logs.
+///
+/// Key relationships: role → M:N → permission. Special: field-level uniqueness and no redundant/cached data (enforced by composite unique index).
+///
+/// @namespace Core
+/// @author AutoBE - https://github.com/wrtnlabs/autobe
+model virtual_account_role_permissions {
+  //----
+  // COLUMNS
+  //----
+  /// Primary Key. Unique link for each assignment of role-permission.
+  id String @id @db.Uuid
+  
+  /// Reference to the target role - Links to {@link virtual_account_roles.id} per M:N design.
+  role_id String @db.Uuid
+  
+  /// Reference to the permission - Links to {@link virtual_account_permissions.id} per M:N design.
+  permission_id String @db.Uuid
+  
+  //----
+  // RELATIONS
+  //----
+  role virtual_account_roles @relation(fields: [role_id], references: [id], onDelete: Cascade)
+  permission virtual_account_permissions @relation(fields: [permission_id], references: [id], onDelete: Cascade)
+  
+  @@index([permission_id])
+  
+  @@unique([role_id, permission_id])
+}

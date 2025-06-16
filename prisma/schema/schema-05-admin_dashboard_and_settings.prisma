@@ -1,0 +1,199 @@
+/// [Admin Dashboard Settings] - This implements the '대시보드 기본 환경/설정 저장' requirement from the 관리대시보드 명세 문서 (06_virtual_account_admin_dashboard.md). 
+///
+/// Defines dashboard personalization and environment settings for individual admins (such as preferred filters, default landing tabs, notification options, table column selection, and saved UI states). Maintains 3NF by isolating user-specific dashboard configurations, ensuring no redundant storage across admins or global config. For example, when an admin changes their default filter (e.g., status=DEPOSIT_WAITING), it's remembered per user. 
+///
+/// Key relationships: Belongs to a specific admin. 
+/// Special behaviors: Each admin can only have one dashboard setting (enforced by unique foreign key), changes are auditable. Settings stored as JSONB blob for extensibility, but no calculated summary fields stored here.
+///
+/// @namespace AdminDashboardAndSettings
+/// @author AutoBE - https://github.com/wrtnlabs/autobe
+model virtual_account_dashboard_settings {
+  //----
+  // COLUMNS
+  //----
+  /// Primary Key. Unique identifier for the dashboard settings record.
+  id String @id @db.Uuid
+  
+  /// Belonged admin's {@link virtual_account_admins.id}.
+  /// Relates to the admin account that owns this dashboard settings entry.
+  virtual_account_admin_id String @db.Uuid
+  
+  /// [Serialized dashboard settings] - Implements extensible user-specific options. 
+  ///
+  /// Stores dashboard configuration (view filters, UI state, notification preference, etc.) serialized as JSONB. Fully atomic for the record as per 1NF—no repeating groups, and extensibility is assured without denormalization. For example, {'defaultTab':'settlements','filters':{'status':'ALL'}}.
+  /// Must be a valid JSON string. No summary/pre-calculated data allowed.
+  settings_json String
+  
+  /// [Creation timestamp] - Implements creation audit trail requirement.
+  ///
+  /// Indicates when the dashboard setting was created. Ensures normalization by keeping time tracking atomic and single-purpose. For example, enables UI to sort/admins to audit settings history.
+  created_at DateTime @db.Timestamptz
+  
+  /// [Last update timestamp] - Supports audit trail for dashboard preference changes.
+  ///
+  /// Atomic timestamp indicating the most recent update of the settings.
+  updated_at DateTime @db.Timestamptz
+  
+  //----
+  // RELATIONS
+  //----
+  admin virtual_account_admins @relation(fields: [virtual_account_admin_id], references: [id], onDelete: Cascade)
+  
+  @@unique([virtual_account_admin_id])
+  
+  @@index([virtual_account_admin_id])
+}
+
+/// [Excel Export Metadata] - Implements the 관리자 대시보드 '엑셀 다운로드 및 이력 관리' requirement from 06_virtual_account_admin_dashboard.md.
+///
+/// Stores log of when/what data was exported to Excel by which admin, to meet compliance and traceability requirements. Maintains 3NF by storing each export event as a separate atomic record (no pre-calculated summaries). For instance, when filtering 입금대기 건 and downloading the Excel, a record is written here.
+///
+/// Key relationships: Linked to the exporting admin. 
+/// Special behaviors: Stores only export metadata, not actual Excel files. Success/failure and type tracked atomically.
+///
+/// @namespace AdminDashboardAndSettings
+/// @author AutoBE - https://github.com/wrtnlabs/autobe
+model virtual_account_excel_exports {
+  //----
+  // COLUMNS
+  //----
+  /// Primary Key.
+  id String @id @db.Uuid
+  
+  /// Admin who triggered the export ({@link virtual_account_admins.id}).
+  /// Connects export history to admin profile for compliance.
+  virtual_account_admin_id String @db.Uuid
+  
+  /// [Export type/category] - Implements export context requirement. 
+  ///
+  /// Indicates what kind of data was exported (eg. DEPOSIT_HISTORY, ACCOUNT_STATUS, NOTIFICATIONS). Atomic string field (categorical). For example, 'DEPOSIT_HISTORY'.
+  export_type String
+  
+  /// [Serialized filter state] - Records which filters were used to create the export (e.g., date & status).
+  ///
+  /// Atomic JSON string. Maintains full normalization (no repeating groups) and traceability. E.g., {'status': 'COMPLETE', 'dateFrom': '2025-01-01'}.
+  ///
+  filter_applied String
+  
+  /// [Export request datetime] - Implements process tracking/auditing.
+  ///
+  /// Atomic timestamp for when export was requested by admin.
+  requested_at DateTime @db.Timestamptz
+  
+  /// [Export success flag] - Shows if export succeeded or errored. 
+  ///
+  /// Atomic flag, no duplication. For example, failed download is tracked distinctly.
+  succeeded Boolean
+  
+  /// [Export file location] - Where the generated export file can be retrieved (eg. S3 URL). May be null if the export failed.
+  /// Atomic URI field, fully normalized.
+  file_path String? @db.VarChar(80000)
+  
+  //----
+  // RELATIONS
+  //----
+  admin virtual_account_admins @relation(fields: [virtual_account_admin_id], references: [id], onDelete: Cascade)
+  
+  @@index([virtual_account_admin_id, requested_at])
+}
+
+/// [Admin Alerts/Warnings] - Implements '이상 감지 경보/알림 이력' requirement from Admin Dashboard doc (06_virtual_account_admin_dashboard.md).
+///
+/// Tracks all critical alerts (예외 알림, 대량 미매칭, API 오류 등) presented to admins for visibility and compliance. Each alert is a fully normalized record (atomic, no aggregation or summary). For example, if 대량 미매칭이 감지되면 각 경보 건이 별도 row로 쌓임.
+///
+/// Key relationships: Related to assigned admin (if specific; nullable for system-wide), can be referenced for audit. 
+/// Special behaviors: Alert context/context_json allows rich detail, and clearable flag enables 'mark as read' functionality for admin UX.
+///
+/// @namespace AdminDashboardAndSettings
+/// @author AutoBE - https://github.com/wrtnlabs/autobe
+model virtual_account_admin_alerts {
+  //----
+  // COLUMNS
+  //----
+  /// Primary Key.
+  id String @id @db.Uuid
+  
+  /// Target admin for the alert ({@link virtual_account_admins.id}). If null, the alert is global or system-wide.
+  ///
+  /// Atomic nullable foreign key, per 3NF. Used for permission filtering and targeted alerting.
+  virtual_account_admin_id String? @db.Uuid
+  
+  /// [Alert type/category] - Implements alert classification requirement.
+  ///
+  /// For example: 'MASS_MISMATCH', 'EXTERNAL_ERROR', 'SECURITY_WARNING'. Atomic, non-null string. Used for filtering and analytics.
+  alert_type String
+  
+  /// [Alert detail/context as JSON] - Implements contextual traceability of alert.
+  ///
+  /// Atomic JSON string storing custom data for the alert scenario (eg. involved accountId, error detail, threshold value). Fully normalized (no array of historical alerts on admins; all alerts are rows here).
+  context_json String
+  
+  /// [When alert was generated/sent to admin] - Meets compliance for alert trail. Atomic, singular date.
+  notified_at DateTime @db.Timestamptz
+  
+  /// [Clearable flag] - Marks if alert can be dismissed by admin (e.g., toggling 'read' status).
+  ///
+  /// Atomic flag, keeps UX state distinct. Allows UI to display unread/urgent items.
+  clearable Boolean
+  
+  /// [Date alert was cleared by admin] - Implements UX-driven tracking for alert resolution. Nullable, null if still active.
+  cleared_at DateTime? @db.Timestamptz
+  
+  //----
+  // RELATIONS
+  //----
+  admin virtual_account_admins? @relation(fields: [virtual_account_admin_id], references: [id], onDelete: Cascade)
+  
+  @@index([virtual_account_admin_id, notified_at])
+}
+
+/// [Admin Action Log] - Implements 관리 이벤트 감사로그 저장 요구사항 (06_virtual_account_admin_dashboard.md, 07_virtual_account_security.md).
+///
+/// Records every major administrative action (예: 엑셀 다운로드, 권한 변경, 알림 정책 편집 등) for full auditability and compliance. This is a fully normalized, append-only log: each action is atomic, no denormalized aggregation or calculation. For example, updating a notification template, exporting data, or changing dashboard defaults all create distinct log entries here.
+///
+/// Key relationships: Linked to admin performing the action. 
+/// Special behaviors: Action type, context/entity/target, result, and IP are all atomic fields—not duplicated elsewhere. Action logs are immutable, only new records inserted.
+///
+/// @namespace AdminDashboardAndSettings
+/// @author AutoBE - https://github.com/wrtnlabs/autobe
+model virtual_account_admin_activity_logs {
+  //----
+  // COLUMNS
+  //----
+  /// Primary Key. Fully unique per activity record.
+  id String @id @db.Uuid
+  
+  /// Admin who performed the action ({@link virtual_account_admins.id}).
+  /// Maintains traceable link for compliance monitoring.
+  virtual_account_admin_id String @db.Uuid
+  
+  /// [Action type] - Implements action classification for audit.
+  ///
+  /// Type/category of the admin action (e.g., 'EXPORT_EXCEL', 'NOTIFICATION_MANAGE', 'USER_ROLE_CHANGE', 'DASHBOARD_SETTING_UPDATE'). Atomic, not calculated.
+  action_type String
+  
+  /// [Target entity type] - Entity or resource affected by the action. For example, 'virtual_account', 'deposit', 'notification_setting'. String, fully normalized.
+  entity_type String
+  
+  /// [Target entity id] - Optional, entity instance targeted. Nullable, so for global/settings actions, can be left null. Maintains 3NF.
+  target_entity_id String? @db.Uuid
+  
+  /// [Action result] - Implements outcome tracking (e.g., 'SUCCESS', 'ERROR', errorMessage). Atomic string, not calculated or duplicated. For example, 'SUCCESS', or 'ERROR: INVALID_STATE'.
+  result String
+  
+  /// [Meta/context data as JSON] - Stores additional atomic context/data about the action. Fully normalized—each log is a single action, no summary here.
+  meta_json String
+  
+  /// [IP address] - The originating IP address for admin's session or action. Atomic value, helps detailed audits and risk tracking. For example, '203.0.113.123'.
+  ip_addr String
+  
+  /// [Timestamp when action occurred] - Implements event tracking for audit. Atomic and 3NF-compliant.
+  occurred_at DateTime @db.Timestamptz
+  
+  //----
+  // RELATIONS
+  //----
+  admin virtual_account_admins @relation(fields: [virtual_account_admin_id], references: [id], onDelete: Cascade)
+  
+  @@index([virtual_account_admin_id, occurred_at])
+}

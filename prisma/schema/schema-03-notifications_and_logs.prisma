@@ -1,0 +1,272 @@
+/// Notification main entity - Implements alerting requirements for deposits, failures, expiration, and admin alerts as described in the requirements. 
+///
+/// Provides core storage and processing for notification events in the virtual account system, separating atomic event data from content/template logic, fully normalized (3NF). For example, every time a deposit status or exceptional event occurs, a row is created here, pointing to channels, templates, and recipient entities. 
+///
+/// Key relationships: linked to notification templates, channels, recipients (via customer/admin/super_admin, FK referencing not shown here), notification event logs. 
+/// Special behaviors: must not store pre-rendered or denormalized message content, only relationships and atomic event metadata.
+///
+/// @namespace NotificationsAndLogs
+/// @author AutoBE - https://github.com/wrtnlabs/autobe
+model virtual_account_notifications {
+  //----
+  // COLUMNS
+  //----
+  /// Primary Key. Unique notification event identifier.
+  id String @id @db.Uuid
+  
+  /// Used template's {@link virtual_account_notification_templates.id}. Indicates the content structure for this event.
+  notification_template_id String @db.Uuid
+  
+  /// Notification channel used {@link virtual_account_notification_channels.id}. Records the physical channel used (kakao, email, sms, etc).
+  notification_channel_id String @db.Uuid
+  
+  /// Type of notification trigger. Implements alerting conditions from requirements (DEPOSIT_CONFIRMED, DEPOSIT_FAIL, EXPIRED, ADMIN_ALERT, etc). Normalized to represent just the event type. For example: used in deciding which template/channel to route. Enforces system event-traceability.
+  event_type String
+  
+  /// Recipient of the notification (could be customer/admin/super_admin depending on event). Implements multi-actor notification tracking from requirements. Fully normalized as atomic reference (actual FK varies in other files, but always UUID). For example: customer receives deposit notification, admin receives system alert.
+  recipient_id String @db.Uuid
+  
+  /// Current status code of the notification (ex: SENT, DELIVERED, FAILED, RETRY_PENDING). Implements notification flow/status tracking requirement. Ensures atomic status handling, 3NF: does not include any aggregate counts or histories.
+  status String
+  
+  /// When this notification event was triggered/generated. Fulfills event auditability and notification timeline requirements. For example: match notification event with corresponding deposit or error.
+  requested_at DateTime @db.Timestamptz
+  
+  /// When the notification was sent out from system to channel. Atomic timestamp, never derived/calculated. Enables step-by-step auditing of notification flow/latency.
+  sent_at DateTime? @db.Timestamptz
+  
+  /// Time notification was delivered/confirmed by final channel provider. Fulfills audit/reporting requirements for delivery status. Null for failed/unknown.
+  delivered_at DateTime? @db.Timestamptz
+  
+  //----
+  // RELATIONS
+  //----
+  template virtual_account_notification_templates @relation(fields: [notification_template_id], references: [id], onDelete: Cascade)
+  channel virtual_account_notification_channels @relation(fields: [notification_channel_id], references: [id], onDelete: Cascade)
+  
+  virtual_account_notification_event_logs virtual_account_notification_event_logs[]
+  
+  @@index([notification_template_id])
+  
+  @@unique([recipient_id, event_type, requested_at])
+  @@index([status, requested_at])
+  @@index([notification_channel_id, requested_at])
+}
+
+/// Notification template master - Implements the message formatting/content structure requirement for various notification events, as separated in requirements docs. 
+///
+/// Stores the format, language, and template variables for all notifications (atomic template data, not rendered/personalized content). Fully normalized (3NF): message variables and template versions kept separate. For example, a new deposit notification type or template update adds a row here, not in notification event log.
+///
+/// Key relationships: referenced by notification events.
+/// Special behaviors: does not include recipient/user data, only template structure.
+///
+/// @namespace NotificationsAndLogs
+/// @author AutoBE - https://github.com/wrtnlabs/autobe
+model virtual_account_notification_templates {
+  //----
+  // COLUMNS
+  //----
+  /// Primary Key.
+  id String @id @db.Uuid
+  
+  /// Logical code or key for this template (e.g., 'DEPOSIT_CONFIRMED_KAKAO'). Implements notification type-to-template mapping requirement. Fully normalized: no duplicate content, only template reference per type/channel.
+  template_code String
+  
+  /// Notification channel type this template is for (kakao, email, sms, etc). Required for multi-channel template support as described in requirements (ex: event has both kakao and email).
+  channel_type String
+  
+  /// Notification template title or subject. Business requirement for email/sms subject lines (actual content rendered per event); atomic data, not derived.
+  title String
+  
+  /// Format style (e.g., text, html, markdown). Implements support for different channel requirements as described in requirements.
+  body_format String
+  
+  /// Templated message body (with variable placeholders). Required by template-driven notification logic in requirements docs.
+  body_template String
+  
+  /// Language identifier for template localization (e.g., 'ko', 'en'). Normalized support for multi-language requirements in templates.
+  language_code String
+  
+  /// Version number of template. Supports audit trails/non-destructive updates for template changes, requirement: historical template access/logging.
+  version Int @db.Integer
+  
+  /// Whether the template is active and available for notification linkage. Business requirement for template enable/disable via admin panel; keeps atomic template state.
+  is_active Boolean
+  
+  //----
+  // RELATIONS
+  //----
+  virtual_account_notifications virtual_account_notifications[]
+  
+  @@unique([template_code, channel_type, language_code, version])
+  @@index([is_active])
+  @@index([title(ops: raw("gin_trgm_ops"))], type: Gin)
+  @@index([body_template(ops: raw("gin_trgm_ops"))], type: Gin)
+}
+
+/// Notification channel master table - Implements the requirement to manage physical and logical notification channels (kakao톡, email, sms, etc) as independently manageable resources. 
+///
+/// Each channel entity represents a delivery medium, allowing channel status, credentials, or settings to be managed and referenced atomically per event. Complies with 3NF: no denormalized configuration in notification events. For example, disabling a channel due to provider issue disables all related notifications; all notification events reference this table only by FK.
+///
+/// Key relationships: referenced by notification events, templates.
+/// Special behaviors: used for admin toggling of channel availability.
+///
+/// @namespace NotificationsAndLogs
+/// @author AutoBE - https://github.com/wrtnlabs/autobe
+model virtual_account_notification_channels {
+  //----
+  // COLUMNS
+  //----
+  /// Primary Key.
+  id String @id @db.Uuid
+  
+  /// Physical/logical channel type identifier (kakao, email, sms, friendtalk, etc). Implements multi-channel notification support. Only single, atomic channel type per row, in line with normalization.
+  channel_type String
+  
+  /// Display name of channel for admin console. Implemented for business/UX requirement: read-friendly representation in settings.
+  display_name String
+  
+  /// Whether the channel can be currently used for sending. Business/admin requirement for toggling channels on/off system-wide; atomic boolean, no derived statuses.
+  is_active Boolean
+  
+  /// JSON document representing provider credentials, config, sender, quotas, etc. Required for extensible per-channel config management; keeps configuration atomic and normalized. (No denormalized/cached tokens here.) Example: storing SMTP/Kakao API key set per channel row.
+  settings_json String
+  
+  //----
+  // RELATIONS
+  //----
+  virtual_account_notifications virtual_account_notifications[]
+  
+  @@unique([channel_type])
+  @@index([is_active])
+  @@index([display_name(ops: raw("gin_trgm_ops"))], type: Gin)
+}
+
+/// Per-event notification status log - Implements per-event, per-recipient audit logging for notification events as required for dashboard, history, and troubleshooting features. 
+///
+/// Tracks all delivery attempts, bounces, state changes for notifications (atomic log line per attempt/status). Fulfills audit, dashboard, and retry condition requirements. 3NF: No duplicate or aggregate state per notification, just log entries referencing their subjects.
+///
+/// Key relationships: notification_id FK to notification events; referenced by dashboard/history/reporting queries.
+/// Special behaviors: may be cleaned-up/archived per policy.
+///
+/// @namespace NotificationsAndLogs
+/// @author AutoBE - https://github.com/wrtnlabs/autobe
+model virtual_account_notification_event_logs {
+  //----
+  // COLUMNS
+  //----
+  /// Primary Key.
+  id String @id @db.Uuid
+  
+  /// Referenced notification's {@link virtual_account_notifications.id}. Implements requirement for log-by-notification linkage.
+  notification_id String @db.Uuid
+  
+  /// Delivery attempt status (e.g., SENT, DELIVERED, FAILED, RETRY, BOUNCED, EXPIRED). Implements per-attempt/result log tracking for notification delivery - requirement: all history preserved, fully normalized, no aggregates here.
+  status String
+  
+  /// Optional description/detail for this status attempt (error message, provider id, etc). For business/audit/ops needs: fully atomic log context per status/event.
+  detail String?
+  
+  /// Timestamp when this log entry was created. Implements reporting/auditing requirements; normalized atomic event log. For example, enables precise timeline on dashboard/statistics.
+  logged_at DateTime @db.Timestamptz
+  
+  //----
+  // RELATIONS
+  //----
+  notification virtual_account_notifications @relation(fields: [notification_id], references: [id], onDelete: Cascade)
+  
+  @@index([notification_id, logged_at])
+  @@index([status])
+}
+
+/// System-wide audit log table - Implements cross-cutting requirement (07_virtual_account_security.md, dashboard, admin UX etc) to record sensitive operations and access for all users. 
+///
+/// Stores atomic, non-derived events (login, permission change, downloads, etc). Fully normalized per event; aggregates only in materialized views. For example: all admin role change, Excel export, 2FA triggers logged here.
+///
+/// Key relationships: may reference various entities by 'actor_id' (customer/admin/super_admin), and target feature by 'target_type'/'target_id'.
+/// Special behaviors: Rationalizes event retention for audit/forensics.
+///
+/// @namespace NotificationsAndLogs
+/// @author AutoBE - https://github.com/wrtnlabs/autobe
+model virtual_account_audit_logs {
+  //----
+  // COLUMNS
+  //----
+  /// Primary Key.
+  id String @id @db.Uuid
+  
+  /// User who performed the action. Implements requirement for audit trail for all critical ops: always normalized as actor UUID. Could refer to any actor-type. For example, admin modifies role.
+  actor_id String @db.Uuid
+  
+  /// Classifies kind of actor/user performing action (customer/admin/super_admin, etc). Requirement for mixed-role security/audit; always atomic string category.
+  actor_type String
+  
+  /// Type of audit event (login, 2fa_trigger, permission_change, export, etc). Fulfills requirement to classify audit actions for drills and reporting.
+  event_type String
+  
+  /// Classification of resource affected (account, deposit, notification, system, etc). Normalized categorical, enables structured querying.
+  target_type String
+  
+  /// ID of resource acted on (referenced object, if any). Requirement from dashboard/detail audit feature.
+  target_id String? @db.Uuid
+  
+  /// Human/audit readable detail of event (can be null for system/anonymous events). For compliance/forensics/business audit needs; atomic, not derived/replicated.
+  description String?
+  
+  /// Atomic UTC timestamp when action occurred. Required for all transparency/security requirement scenarios.
+  occurred_at DateTime @db.Timestamptz
+  
+  //----
+  // RELATIONS
+  //----
+  @@unique([actor_id, event_type, occurred_at])
+  @@index([occurred_at])
+}
+
+/// Security incident/event log - Implements all 07_virtual_account_security.md requirements for detailed monitoring/forensic record of sensitive security-related events (login failure, otp trigger, invalid access, api abuse, etc). 
+///
+/// Data stored is strictly atomic/fully normalized for each event; aggregates only in views. For example: failed login causes a security log row to be written here, distinct from audit log.
+///
+/// Key relationships: references actor_id for user details, links to event source/resource via optional IDs. Administrators can query or trigger alerts as needed.
+/// Special behaviors: may be purged/archived as required by business/policy.
+///
+/// @namespace NotificationsAndLogs
+/// @author AutoBE - https://github.com/wrtnlabs/autobe
+model virtual_account_security_logs {
+  //----
+  // COLUMNS
+  //----
+  /// Primary Key.
+  id String @id @db.Uuid
+  
+  /// Person/system who triggered the event (customer/admin/super_admin, etc). Implements normalized actor-ref for incident tracking, requirement for all security-related events in forensics.
+  actor_id String @db.Uuid
+  
+  /// Category of actor ('customer', 'admin', 'super_admin', 'system', etc). Implements cross-type security incident tracking.
+  actor_type String
+  
+  /// Security event classification (login_fail, otp_fail, unauthorized_access, key_rotation, api_throttle, etc). Fulfills requirement for granular security audit, reporting, and alerting. Atomic category, never redundant or denormalized.
+  event_type String
+  
+  /// IP address (if available) of event instigator. Requirement for security incident trace/audit; atomic string, not composite. For example, needed for geo-audit/ban activities.
+  ip String?
+  
+  /// Type of target resource affected (account, oauth_client, hmac_key, notification, deposit, etc). Just a simple code; no aggregates or calculated fields, conforms to normalization.
+  resource_type String
+  
+  /// ID of resource object. Allows for flexible, normalized relation for security event tracking.
+  resource_id String? @db.Uuid
+  
+  /// Optional event context/message (stacktrace, error, extra info for forensics). For requirements on check/analysis of security event details.
+  detail String?
+  
+  /// ISO UTC timestamp of when the event took place. Implements temporal and order of events requirement from security documentation. Used in all incident and root cause analysis workflows.
+  occurred_at DateTime @db.Timestamptz
+  
+  //----
+  // RELATIONS
+  //----
+  @@unique([actor_id, event_type, occurred_at])
+  @@index([occurred_at])
+  @@index([event_type])
+}
